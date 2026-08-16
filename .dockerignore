@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+.git
+.gitignore
+*.md
+data/
+.env
+.venv
+venv
+agent-transcripts
+*.session
+*.session-journal
+*.db
+*.log

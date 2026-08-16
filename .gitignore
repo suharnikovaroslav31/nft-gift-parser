@@ -1,0 +1,12 @@
+.env
+data/
+__pycache__/
+*.pyc
+*.session
+*.session-journal
+.venv/
+venv/
+*.log
+session_string.txt
+.cursor/
+*.zip
