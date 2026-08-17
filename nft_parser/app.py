@@ -419,85 +419,59 @@ async def run_userbot(settings: Settings) -> None:
     dp.callback_query.middleware(middleware)
     dp.include_router(router)
 
-    log.info("Логин юзербота…")
-    if settings.session_string.strip():
-        await userbot.connect()
-        if not await userbot.is_user_authorized():
-            log.error("SESSION_STRING недействительна. Сгенерируй её локально и вставь в env Bothost.")
-            await userbot.disconnect()
-            return
-        await userbot.start()
-    else:
-        await userbot.start(phone=settings.phone or None)
-    await apply_userbot_mode(db)
-    await scanner.start()
-    me = await userbot.get_me()
-    scanner_id = int(me.id)
-    await db.set_setting("scanner_id", str(scanner_id))
-    await db.set_setting("scanner_username", me.username or "")
-    await db.remove_admin(scanner_id)
-    notifier.skip_ids.add(scanner_id)
-    owner = await db.get_setting("owner_id")
-    if owner == str(scanner_id):
-        await db.set_setting("owner_id", "")
-        owner = ""
-    panel = [uid for uid in await db.list_admins() if uid != scanner_id]
-    if panel and not owner:
-        await db.set_setting("owner_id", str(panel[0]))
-    log.info(
-        "Юзербот @%s парсит. Админка — бот @parsers_informain_bot, напиши /start с личного аккаунта",
-        me.username or scanner_id,
-    )
-
-    async def _bootstrap() -> None:
-        removed = await db.purge_synthetic_chats()
-        if removed:
-            log.info("Убрал фейковые web-чаты: %s", removed)
-        ok, fail = await scanner.join_catalog(CATALOG)
-        log.info("Каталог юзербота: ок=%s fail=%s", len(ok), len(fail))
-        if fail:
-            log.warning("Не вступил: %s", "; ".join(fail[:8]))
-
-        extra = await scanner.watch_all_dialogs()
-        log.info("Подхватил диалоги юзербота: %s чатов", extra)
-
-        warmed = 0
-        people = {
-            item["username"].lower()
-            for item in CATALOG
-            if item.get("kind") in {"chat", "community"}
-        }
-        track = {name.lower() for name in tracker_usernames()} | people
-        for chat in await db.list_chats():
-            uname = (chat.get("username") or "").lower()
-            if uname not in track or not chat.get("enabled"):
-                continue
-            limit = 40 if uname in people else 15
+    async def login_userbot() -> None:
+        log.info("Логин юзербота…")
+        try:
+            if settings.session_string.strip():
+                await asyncio.wait_for(userbot.connect(), timeout=45)
+                if not await userbot.is_user_authorized():
+                    log.error("SESSION_STRING недействительна")
+                    await notifier.send_text(
+                        f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
+                        "SESSION_STRING недействительна. Сгенерируй заново и передеплой."
+                    )
+                    return
+                await userbot.start()
+            else:
+                await asyncio.wait_for(userbot.start(phone=settings.phone or None), timeout=45)
+        except Exception:
+            log.exception("Не удалось залогинить юзербота")
             try:
-                warmed += await scanner.scan_recent(int(chat["chat_id"]), limit=limit)
+                await notifier.send_text(
+                    f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
+                    "Панель бота работает, парсер нет. Проверь SESSION_STRING / API_ID в Bothost."
+                )
             except Exception:
-                log.exception("Прогрев @%s", uname)
-        log.info("Прогрев истории: %s проверок в очереди", warmed)
-        chats_n = len(await db.list_chats())
-        panel = await db.list_admins()
-        hello = (
-            f'{pe("fire")} <b>Админ-панель</b>\n'
-            f'{pe("user")} парсер: юзербот @{me.username or me.id}\n'
-            f'{pe("chat")} каналов: <b>{chats_n}</b>\n'
-            f'{pe("teddy")} ≤4 NFT · lvl ≤3 · дешёвые гифты'
-        )
-        if panel:
-            await notifier.send_text(hello)
-        else:
-            log.warning("Админки ещё нет: открой @parsers_informain_bot с личного аккаунта и нажми /start")
+                pass
+            return
 
+        await apply_userbot_mode(db)
+        await scanner.start()
+        me = await userbot.get_me()
+        scanner_id = int(me.id)
+        await db.set_setting("scanner_id", str(scanner_id))
+        await db.set_setting("scanner_username", me.username or "")
+        await db.remove_admin(scanner_id)
+        notifier.skip_ids.add(scanner_id)
+        owner = await db.get_setting("owner_id")
+        if owner == str(scanner_id):
+            await db.set_setting("owner_id", "")
+            owner = ""
+        panel = [uid for uid in await db.list_admins() if uid != scanner_id]
+        if panel and not owner:
+            await db.set_setting("owner_id", str(panel[0]))
+        log.info(
+            "Юзербот @%s парсит. Админка — бот @parsers_informain_bot, напиши /start с личного аккаунта",
+            me.username or scanner_id,
+        )
+        await asyncio.gather(_worker(app), _market(app), _bootstrap(app, me, scanner, db, notifier))
+
+    log.info("Стартую панель бота…")
     try:
         await asyncio.gather(
             dp.start_polling(bot),
-            _worker(app),
-            _market(app),
             notifier.pace_loop(),
-            _bootstrap(),
+            login_userbot(),
         )
     finally:
         await app.feed.close()
@@ -505,6 +479,49 @@ async def run_userbot(settings: Settings) -> None:
         await bot.session.close()
         await userbot.disconnect()
         await db.close()
+
+
+async def _bootstrap(app: App, me: Any, scanner: Any, db: Database, notifier: Notifier) -> None:
+    removed = await db.purge_synthetic_chats()
+    if removed:
+        log.info("Убрал фейковые web-чаты: %s", removed)
+    ok, fail = await scanner.join_catalog(CATALOG)
+    log.info("Каталог юзербота: ок=%s fail=%s", len(ok), len(fail))
+    if fail:
+        log.warning("Не вступил: %s", "; ".join(fail[:8]))
+
+    extra = await scanner.watch_all_dialogs()
+    log.info("Подхватил диалоги юзербота: %s чатов", extra)
+
+    warmed = 0
+    people = {
+        item["username"].lower()
+        for item in CATALOG
+        if item.get("kind") in {"chat", "community"}
+    }
+    track = {name.lower() for name in tracker_usernames()} | people
+    for chat in await db.list_chats():
+        uname = (chat.get("username") or "").lower()
+        if uname not in track or not chat.get("enabled"):
+            continue
+        limit = 40 if uname in people else 15
+        try:
+            warmed += await scanner.scan_recent(int(chat["chat_id"]), limit=limit)
+        except Exception:
+            log.exception("Прогрев @%s", uname)
+    log.info("Прогрев истории: %s проверок в очереди", warmed)
+    chats_n = len(await db.list_chats())
+    panel = await db.list_admins()
+    hello = (
+        f'{pe("fire")} <b>Админ-панель</b>\n'
+        f'{pe("user")} парсер: юзербот @{me.username or me.id}\n'
+        f'{pe("chat")} каналов: <b>{chats_n}</b>\n'
+        f'{pe("teddy")} ≤4 NFT · lvl ≤3 · дешёвые гифты'
+    )
+    if panel:
+        await notifier.send_text(hello)
+    else:
+        log.warning("Админки ещё нет: открой @parsers_informain_bot с личного аккаунта и нажми /start")
 
 
 async def _worker(app: App) -> None:
