@@ -6,7 +6,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -445,66 +445,40 @@ def acquire_userbot_lock():
         return None
 
 
-async def authorize_userbot(
-    userbot: Any,
-    on_duplicate: Callable[[], Awaitable[None]] | None = None,
-) -> str | None:
+async def authorize_userbot(userbot: Any) -> str | None:
     from telethon import errors, functions
 
     await connect_userbot(userbot)
-    last = "Telegram не подтвердил сессию"
-    duplicate_told = False
-    for attempt in range(3):
+    try:
+        await asyncio.wait_for(userbot(functions.updates.GetStateRequest()), timeout=30)
+        return None
+    except errors.AuthKeyDuplicatedError:
+        log.warning("AuthKeyDuplicated — сразу новый вход")
+        try:
+            await userbot.disconnect()
+        except Exception:
+            pass
+        return "AuthKeyDuplicated"
+    except errors.AuthKeyUnregisteredError:
+        try:
+            await userbot.disconnect()
+        except Exception:
+            pass
+        return "AuthKeyUnregistered"
+    except errors.FloodWaitError as exc:
+        wait = min(int(getattr(exc, "seconds", 5) or 5) + 1, 90)
+        log.warning("GetState FloodWait %sс, жду", wait)
+        await asyncio.sleep(wait)
         try:
             await asyncio.wait_for(userbot(functions.updates.GetStateRequest()), timeout=30)
             return None
-        except errors.FloodWaitError as exc:
-            wait = min(int(getattr(exc, "seconds", 5) or 5) + 1, 90)
-            last = f"FloodWait {wait}с"
-            log.warning("GetState FloodWait %sс, жду", wait)
-            await asyncio.sleep(wait)
-        except errors.AuthKeyDuplicatedError:
-            last = (
-                "AuthKeyDuplicated: ключ юзербота занят старым коннектом "
-                "(не телефон и не Telegram на компе). Жду, пока Telegram его отпустит."
-            )
-            log.warning("%s попытка %s", last, attempt + 1)
-            if on_duplicate and not duplicate_told:
-                duplicate_told = True
-                try:
-                    await on_duplicate()
-                except Exception:
-                    log.exception("Не отправил уведомление про дубль сессии")
-            try:
-                await userbot.disconnect()
-            except Exception:
-                pass
-            await asyncio.sleep(8)
-            try:
-                await connect_userbot(userbot)
-            except Exception:
-                log.exception("Не переподключил юзербота после дубля")
-        except errors.AuthKeyUnregisteredError:
-            last = "AuthKeyUnregistered: ключ сброшен, нужна новая сессия"
-            dc = int(getattr(userbot.session, "dc_id", 0) or 2)
-            ip, port = TG_DC.get(dc, TG_DC[2])
-            log.warning("AuthKeyUnregistered, DC %s %s", dc, ip)
-            try:
-                userbot.session.set_dc(dc, ip, port)
-                await userbot.disconnect()
-                await connect_userbot(userbot)
-            except Exception:
-                log.exception("Не переподключил DC")
-                return last
-        except errors.RPCError as exc:
-            last = f"{type(exc).__name__}: {exc}"
-            log.warning("GetState RPC: %s", last)
-            return last
-        except Exception as exc:
-            last = f"{type(exc).__name__}: {exc}"
-            log.exception("GetState упал")
-            return last
-    return last
+        except Exception as retry_exc:
+            return f"{type(retry_exc).__name__}: {retry_exc}"
+    except errors.RPCError as exc:
+        return f"{type(exc).__name__}: {exc}"
+    except Exception as exc:
+        log.exception("GetState упал")
+        return f"{type(exc).__name__}: {exc}"
 
 
 async def run_userbot(settings: Settings) -> None:
@@ -581,17 +555,16 @@ async def run_userbot(settings: Settings) -> None:
                 return
             if settings.session_string.strip():
                 log.info("SESSION_STRING длина=%s", len(settings.session_string.strip()))
-
-                async def say_duplicate() -> None:
-                    await notifier.send_text(
-                        "Старый ключ занят. Сейчас пришлю ссылку, чтобы юзербот вошёл заново и отключил старые сессии парсера."
-                    )
-
-                why = await authorize_userbot(userbot, on_duplicate=say_duplicate)
+                why = await authorize_userbot(userbot)
                 if why:
                     log.error("Юзербот не авторизован: %s", why)
-                    await notifier.send_text(
-                        f'{pe("warn")} Старый ключ не пускает. Делаю новый вход и отключу старые сессии парсера…'
+                    try:
+                        await userbot.disconnect()
+                    except Exception:
+                        pass
+                    await notifier.send_direct(
+                        "Старый ключ юзербота занят. Делаю новую ссылку входа. "
+                        "Телефон и Telegram на компе не трогаю."
                     )
                     qr_error = await takeover_by_qr(settings, notifier)
                     if qr_error:
@@ -613,9 +586,7 @@ async def run_userbot(settings: Settings) -> None:
                         "Телефон и Telegram на компе оставил."
                     )
             else:
-                await notifier.send_text(
-                    f'{pe("warn")} Нет SESSION_STRING. Делаю новый вход юзербота…'
-                )
+                await notifier.send_direct("Нет SESSION_STRING. Делаю новую ссылку входа юзербота.")
                 qr_error = await takeover_by_qr(settings, notifier)
                 if qr_error:
                     await notifier.send_text(

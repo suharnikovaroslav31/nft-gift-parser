@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 router = Router()
-BUILD = "17aug-f"
+BUILD = "17aug-g"
 
 FILTER_HINTS = {
     "newbie_max": "Сколько unique NFT максимум (новичок).",

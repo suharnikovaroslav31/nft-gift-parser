@@ -312,7 +312,6 @@ class Notifier:
                 message = await self.bot.send_message(
                     admin_id,
                     text,
-                    parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                 )
                 posted.append((admin_id, message.message_id))

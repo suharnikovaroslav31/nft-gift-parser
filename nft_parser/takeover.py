@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import html
 import logging
 import os
 import sys
 from typing import Any
 
 from nft_parser.config import Settings, session_file_path
-from nft_parser.emoji import pe
 from nft_parser.notifier import Notifier
 
 log = logging.getLogger(__name__)
@@ -82,7 +80,10 @@ async def _edit_or_send(notifier: Notifier, posts: list[tuple[int, int]], text: 
                     disable_web_page_preview=True,
                 )
             except Exception:
-                log.exception("Не обновил QR-сообщение")
+                log.exception("Не обновил ссылку входа")
+                extra = await notifier.send_direct(text)
+                if extra:
+                    return extra
         return posts
     return await notifier.send_direct(text)
 
@@ -94,7 +95,10 @@ async def takeover_by_qr(settings: Settings, notifier: Notifier) -> str | None:
     from telethon.sessions import StringSession
 
     if not (settings.api_id and settings.api_hash):
+        await notifier.send_direct("Нет API_ID / API_HASH, ссылку входа сделать не могу.")
         return "Нет API_ID / API_HASH для нового входа."
+
+    await notifier.send_direct("Подключаюсь к Telegram, сейчас пришлю ссылку входа юзербота…")
 
     client = TelegramClient(
         StringSession(),
@@ -115,24 +119,20 @@ async def takeover_by_qr(settings: Settings, notifier: Notifier) -> str | None:
         qr = await client.qr_login()
         for _ in range(8):
             text = (
-                f'{pe("warn")} <b>Нужно подтвердить юзербота</b>\n\n'
-                "Старый ключ занят, поэтому делаю <b>новый вход</b> и потом отключу "
-                "старые сессии парсера. Телефон и Telegram на компе не трогаю.\n\n"
-                "1. На телефоне переключись на аккаунт юзербота (не этот чат).\n"
-                "2. Открой ссылку:\n"
-                f"<code>{html.escape(qr.url)}</code>\n\n"
-                "Если попросит облачный пароль — напиши сюда <code>/2fa пароль</code>."
+                "Нужно подтвердить юзербота.\n"
+                "1. На телефоне открой аккаунт юзербота (не этот чат).\n"
+                "2. Открой эту ссылку:\n"
+                f"{qr.url}\n\n"
+                "Если спросит облачный пароль — напиши: /2fa пароль"
             )
             posts = await _edit_or_send(notifier, posts, text)
+            await notifier.send_direct(qr.url)
             try:
                 await qr.wait()
                 break
             except errors.SessionPasswordNeededError:
                 _password_future = asyncio.get_running_loop().create_future()
-                await notifier.send_text(
-                    f'{pe("warn")} Нужен облачный пароль 2FA юзербота.\n'
-                    "Напиши: <code>/2fa пароль</code>"
-                )
+                await notifier.send_direct("Нужен облачный пароль. Напиши: /2fa пароль")
                 try:
                     password = await asyncio.wait_for(_password_future, timeout=180)
                 except asyncio.TimeoutError:
@@ -144,7 +144,7 @@ async def takeover_by_qr(settings: Settings, notifier: Notifier) -> str | None:
             except asyncio.TimeoutError:
                 await qr.recreate()
         else:
-            return "Не подтвердили QR вовремя."
+            return "Не подтвердили ссылку вовремя."
 
         if not await client.is_user_authorized():
             return "QR-вход не завершился."
@@ -155,14 +155,14 @@ async def takeover_by_qr(settings: Settings, notifier: Notifier) -> str | None:
         persist_session(session)
         killed = await kick_other_sessions(client)
         me = await client.get_me()
-        await notifier.send_text(
-            f'{pe("check")} Юзербот @{html.escape(me.username or str(me.id))} вошёл заново.\n'
-            f"Отключил старых сессий парсера: <b>{killed}</b>.\n"
-            "Перезапускаюсь…"
+        await notifier.send_direct(
+            f"Юзербот @{me.username or me.id} вошёл заново. "
+            f"Отключил старых сессий парсера: {killed}. Перезапускаюсь."
         )
         return None
     except Exception as exc:
         log.exception("QR-вход не удался")
+        await notifier.send_direct(f"Не смог сделать ссылку входа: {type(exc).__name__}: {exc}")
         return f"{type(exc).__name__}: {exc}"
     finally:
         _password_future = None
