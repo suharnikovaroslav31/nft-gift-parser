@@ -6,6 +6,22 @@ from pathlib import Path
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_SESSION_PREFIXES = ("SESSION_STRING=", "STRING_SESSION=", "SESSION=")
+
+
+def clean_session_value(value: str) -> str:
+    text = value.strip().strip('"').strip("'").replace("\r", "").replace("\n", "").replace(" ", "")
+    upper = text.upper()
+    for prefix in _SESSION_PREFIXES:
+        if upper.startswith(prefix):
+            text = text.split("=", 1)[1]
+            break
+    return text.strip()
+
+
+def session_file_path() -> Path:
+    return Path(os.getenv("DATA_DIR", "data")) / "session_string.txt"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -56,7 +72,7 @@ class Settings(BaseSettings):
     def clean_session_string(cls, value: object) -> object:
         if not isinstance(value, str):
             return value
-        return value.strip().strip('"').strip("'").replace("\r", "").replace("\n", "")
+        return clean_session_value(value)
 
     @field_validator("proxy_port", mode="before")
     @classmethod

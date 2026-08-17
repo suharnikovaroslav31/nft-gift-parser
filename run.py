@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from nft_parser.app import run
-from nft_parser.config import Settings
+from nft_parser.config import Settings, clean_session_value, session_file_path
 
 log = logging.getLogger(__name__)
 
@@ -21,7 +21,6 @@ _CANON = {
         "TELEGRAM_SESSION",
         "TELEGRAM_SESSION_STRING",
         "USERBOT_SESSION",
-        "SESSION",
     ),
     "PHONE": ("PHONE", "TELEGRAM_PHONE", "TG_PHONE"),
     "ADMIN_IDS": ("ADMIN_IDS", "ADMIN_ID", "ADMINS"),
@@ -76,19 +75,27 @@ def hydrate_env() -> None:
         if found:
             os.environ[dest] = found
 
-    if _clean(os.environ.get("SESSION_STRING", "")):
-        return
+    chunks: list[str] = []
+    for index in range(1, 6):
+        piece = clean_session_value(os.environ.get(f"SESSION_STRING_{index}", "") or by_norm.get(f"SESSION_STRING_{index}", ""))
+        if piece:
+            chunks.append(piece)
+    joined = "".join(chunks)
+    env_session = clean_session_value(os.environ.get("SESSION_STRING", ""))
+    file_session = ""
     for path in (
-        Path(os.getenv("DATA_DIR", "data")) / "session_string.txt",
+        session_file_path(),
         Path("/app/data/session_string.txt"),
         Path("/usr/src/app/data/session_string.txt"),
         Path("session_string.txt"),
     ):
         if path.is_file():
-            text = _clean(path.read_text(encoding="utf-8"))
-            if text:
-                os.environ["SESSION_STRING"] = text
-                return
+            file_session = clean_session_value(path.read_text(encoding="utf-8"))
+            if file_session:
+                break
+    best = max((item for item in (env_session, joined, file_session) if item), key=len, default="")
+    if best:
+        os.environ["SESSION_STRING"] = best
 
 
 def setup_logging() -> None:
@@ -112,6 +119,9 @@ def main() -> None:
     hydrate_env()
     setup_logging()
     settings = Settings()
+    env_session = os.environ.get("SESSION_STRING", "").strip()
+    if env_session and len(env_session) > len(settings.session_string.strip()):
+        settings.session_string = env_session
     interesting = sorted(
         key
         for key in os.environ
@@ -122,11 +132,11 @@ def main() -> None:
     )
     log.info("env keys: %s", ", ".join(interesting) or "—")
     log.info(
-        "boot token=%s api_id=%s hash=%s session=%s phone=%s userbot=%s data_dir=%s port=%s",
+        "boot token=%s api_id=%s hash=%s session_len=%s phone=%s userbot=%s data_dir=%s port=%s",
         bool(settings.bot_token),
         bool(settings.api_id),
         bool(settings.api_hash),
-        bool(settings.session_string.strip()),
+        len(settings.session_string.strip()),
         bool(settings.phone),
         settings.has_userbot,
         os.getenv("DATA_DIR"),

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
+import os
+import sys
 from typing import TYPE_CHECKING, Any
 
 from aiogram import BaseMiddleware, F, Router
@@ -12,6 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from nft_parser.catalog import CATALOG, MARKETPLACES
+from nft_parser.config import clean_session_value, session_file_path
 from nft_parser.db import Database
 from nft_parser.emoji import icon, pe
 from nft_parser.web_feed import web_chat_id
@@ -98,6 +102,7 @@ class Form(StatesGroup):
     add_chat = State()
     check_user = State()
     set_number = State()
+    set_session = State()
 
 
 def btn(text: str, data: str | None = None, *, url: str | None = None, key: str | None = None) -> InlineKeyboardButton:
@@ -200,7 +205,8 @@ async def home_text(app: App, user: Any) -> str:
             warn = (
                 f'\n\n{pe("warn")} <b>карточки не идут</b>: нет сессии юзербота.\n'
                 f"{env_report(app)}\n"
-                "В Bothost должна быть переменная <code>SESSION_STRING</code>."
+                "Пришли боту <code>/setsession</code> и следом строку из "
+                "<code>session_string.txt</code>."
             )
     return (
         f'{pe("fire")} <b>Gift Hunter</b>\n\n'
@@ -397,6 +403,39 @@ def chats_kb(chats: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     rows.append([btn("Добавить чат", "chat:add", key="plus")])
     rows.append([btn("Назад", "menu:settings", key="back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def save_session_and_restart(message: Message, raw: str) -> None:
+    session = clean_session_value(raw)
+    if len(session) < 80:
+        await message.answer("Слишком коротко. Нужна вся строка из session_string.txt одним сообщением.")
+        return
+    path = session_file_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(session, encoding="utf-8")
+    os.environ["SESSION_STRING"] = session
+    await message.answer(
+        f"Сессия сохранена ({len(session)} симв.). Перезапускаюсь — через минуту жми /start."
+    )
+    await asyncio.sleep(1)
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
+@router.message(Command("setsession"))
+async def cmd_setsession(message: Message, state: FSMContext) -> None:
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) > 1 and parts[1].strip():
+        await state.clear()
+        await save_session_and_restart(message, parts[1])
+        return
+    await state.set_state(Form.set_session)
+    await message.answer("Пришли одним сообщением строку из session_string.txt.")
+
+
+@router.message(Form.set_session)
+async def got_session(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await save_session_and_restart(message, message.text or "")
 
 
 @router.message(CommandStart())

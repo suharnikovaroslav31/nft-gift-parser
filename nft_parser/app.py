@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 from dataclasses import dataclass
@@ -379,7 +380,7 @@ async def run(settings: Settings) -> None:
         f"API_ID: <b>{'есть' if settings.api_id else 'нет'}</b>\n"
         f"API_HASH: <b>{'есть' if settings.api_hash else 'нет'}</b>\n"
         f"SESSION_STRING: <b>{'есть (' + str(len(settings.session_string.strip())) + ' симв.)' if settings.session_string.strip() else 'нет'}</b>\n"
-        "Если SESSION_STRING «нет» — вставь её в env Bothost целиком и передеплой."
+        "Если SESSION_STRING «нет» — пришли боту /setsession и строку из session_string.txt."
     )
     try:
         await asyncio.gather(
@@ -440,6 +441,7 @@ async def run_userbot(settings: Settings) -> None:
         app_version="5.0",
         connection_retries=5,
         timeout=30,
+        use_ipv6=False,
     )
     bot = make_bot(settings.bot_token)
     dp = Dispatcher()
@@ -492,15 +494,18 @@ async def run_userbot(settings: Settings) -> None:
             else:
                 await notifier.send_text(
                     f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
-                    "SESSION_STRING пустая. Добавь её в Bothost и передеплой."
+                    "SESSION_STRING пустая. Пришли боту /setsession и строку из session_string.txt."
                 )
                 return
-        except Exception:
+        except Exception as exc:
             log.exception("Не удалось залогинить юзербота")
             try:
+                err = html.escape(f"{type(exc).__name__}: {str(exc)[:180]}")
                 await notifier.send_text(
                     f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
-                    "Панель бота работает, парсер нет. Проверь SESSION_STRING / API_ID в Bothost."
+                    "Панель бота работает, парсер нет.\n"
+                    f"ошибка: <code>{err}</code>\n"
+                    "Можно прислать /setsession и строку из session_string.txt."
                 )
             except Exception:
                 pass
