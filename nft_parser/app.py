@@ -419,6 +419,47 @@ async def connect_userbot(userbot: Any) -> None:
     await asyncio.wait_for(userbot.connect(), timeout=30)
 
 
+async def authorize_userbot(userbot: Any) -> str | None:
+    from telethon import errors, functions
+
+    await connect_userbot(userbot)
+    last = "Telegram не подтвердил сессию"
+    for attempt in range(4):
+        try:
+            await asyncio.wait_for(userbot(functions.updates.GetStateRequest()), timeout=30)
+            return None
+        except errors.FloodWaitError as exc:
+            wait = min(int(getattr(exc, "seconds", 5) or 5) + 1, 90)
+            last = f"FloodWait {wait}с"
+            log.warning("GetState FloodWait %sс, жду", wait)
+            await asyncio.sleep(wait)
+        except errors.AuthKeyDuplicatedError:
+            last = "AuthKeyDuplicated: эта сессия уже открыта в другом месте"
+            log.warning(last)
+            await asyncio.sleep(5)
+        except errors.AuthKeyUnregisteredError:
+            last = "AuthKeyUnregistered: ключ сброшен, нужна новая сессия"
+            dc = int(getattr(userbot.session, "dc_id", 0) or 2)
+            ip, port = TG_DC.get(dc, TG_DC[2])
+            log.warning("AuthKeyUnregistered, DC %s %s", dc, ip)
+            try:
+                userbot.session.set_dc(dc, ip, port)
+                await userbot.disconnect()
+                await connect_userbot(userbot)
+            except Exception:
+                log.exception("Не переподключил DC")
+                return last
+        except errors.RPCError as exc:
+            last = f"{type(exc).__name__}: {exc}"
+            log.warning("GetState RPC: %s", last)
+            return last
+        except Exception as exc:
+            last = f"{type(exc).__name__}: {exc}"
+            log.exception("GetState упал")
+            return last
+    return last
+
+
 async def run_userbot(settings: Settings) -> None:
     from telethon import TelegramClient
 
@@ -442,6 +483,7 @@ async def run_userbot(settings: Settings) -> None:
         connection_retries=5,
         timeout=30,
         use_ipv6=False,
+        flood_sleep_threshold=24 * 60 * 60,
     )
     bot = make_bot(settings.bot_token)
     dp = Dispatcher()
@@ -481,13 +523,13 @@ async def run_userbot(settings: Settings) -> None:
         try:
             if settings.session_string.strip():
                 log.info("SESSION_STRING длина=%s", len(settings.session_string.strip()))
-                await connect_userbot(userbot)
-                if not await userbot.is_user_authorized():
-                    log.error("SESSION_STRING недействительна")
+                why = await authorize_userbot(userbot)
+                if why:
+                    log.error("Юзербот не авторизован: %s", why)
                     await notifier.send_text(
                         f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
-                        "SESSION_STRING дошла, но Telegram её не принял.\n"
-                        f"длина сессии: <b>{len(settings.session_string.strip())}</b>"
+                        f"длина сессии: <b>{len(settings.session_string.strip())}</b>\n"
+                        f"ошибка: <code>{html.escape(why[:220])}</code>"
                     )
                     return
                 await asyncio.wait_for(userbot.start(), timeout=45)
