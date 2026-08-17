@@ -5,7 +5,8 @@ import html
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Awaitable, Callable
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -419,12 +420,40 @@ async def connect_userbot(userbot: Any) -> None:
     await asyncio.wait_for(userbot.connect(), timeout=30)
 
 
-async def authorize_userbot(userbot: Any) -> str | None:
+def acquire_userbot_lock():
+    path = Path(os.getenv("DATA_DIR", "data")) / "userbot.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+", encoding="utf-8")
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        handle.seek(0)
+        handle.truncate()
+        handle.write(str(os.getpid()))
+        handle.flush()
+        return handle
+    except OSError:
+        handle.close()
+        return None
+
+
+async def authorize_userbot(
+    userbot: Any,
+    on_duplicate: Callable[[], Awaitable[None]] | None = None,
+) -> str | None:
     from telethon import errors, functions
 
     await connect_userbot(userbot)
     last = "Telegram не подтвердил сессию"
-    for attempt in range(4):
+    duplicate_told = False
+    for attempt in range(10):
         try:
             await asyncio.wait_for(userbot(functions.updates.GetStateRequest()), timeout=30)
             return None
@@ -434,9 +463,26 @@ async def authorize_userbot(userbot: Any) -> str | None:
             log.warning("GetState FloodWait %sс, жду", wait)
             await asyncio.sleep(wait)
         except errors.AuthKeyDuplicatedError:
-            last = "AuthKeyDuplicated: эта сессия уже открыта в другом месте"
-            log.warning(last)
-            await asyncio.sleep(5)
+            last = (
+                "AuthKeyDuplicated: ключ юзербота занят старым коннектом "
+                "(не телефон и не Telegram на компе). Жду, пока Telegram его отпустит."
+            )
+            log.warning("%s попытка %s", last, attempt + 1)
+            if on_duplicate and not duplicate_told:
+                duplicate_told = True
+                try:
+                    await on_duplicate()
+                except Exception:
+                    log.exception("Не отправил уведомление про дубль сессии")
+            try:
+                await userbot.disconnect()
+            except Exception:
+                pass
+            await asyncio.sleep(20)
+            try:
+                await connect_userbot(userbot)
+            except Exception:
+                log.exception("Не переподключил юзербота после дубля")
         except errors.AuthKeyUnregisteredError:
             last = "AuthKeyUnregistered: ключ сброшен, нужна новая сессия"
             dc = int(getattr(userbot.session, "dc_id", 0) or 2)
@@ -471,6 +517,10 @@ async def run_userbot(settings: Settings) -> None:
     await db.connect()
     for admin_id in settings.admin_id_list():
         await db.add_admin(admin_id)
+
+    lock_fp = acquire_userbot_lock()
+    if lock_fp is None:
+        log.error("Юзербот уже запущен в другом процессе этого контейнера")
 
     userbot = TelegramClient(
         settings.telethon_session(),
@@ -521,9 +571,23 @@ async def run_userbot(settings: Settings) -> None:
     async def login_userbot() -> None:
         log.info("Логин юзербота…")
         try:
+            if lock_fp is None:
+                await notifier.send_text(
+                    f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
+                    "В контейнере уже есть второй процесс с этой сессией. "
+                    "На Bothost должен быть один бот, без своего Dockerfile если main.py запускается сам."
+                )
+                return
             if settings.session_string.strip():
                 log.info("SESSION_STRING длина=%s", len(settings.session_string.strip()))
-                why = await authorize_userbot(userbot)
+
+                async def say_duplicate() -> None:
+                    await notifier.send_text(
+                        "Сессия юзербота занята старым коннектом. "
+                        "Это не телефон и не Telegram на компе. Жду до 3 минут, пока Telegram отпустит ключ…"
+                    )
+
+                why = await authorize_userbot(userbot, on_duplicate=say_duplicate)
                 if why:
                     log.error("Юзербот не авторизован: %s", why)
                     await notifier.send_text(
@@ -588,6 +652,11 @@ async def run_userbot(settings: Settings) -> None:
         await bot.session.close()
         await userbot.disconnect()
         await db.close()
+        if lock_fp is not None:
+            try:
+                lock_fp.close()
+            except Exception:
+                pass
 
 
 async def _bootstrap(app: App, me: Any, scanner: Any, db: Database, notifier: Notifier) -> None:
