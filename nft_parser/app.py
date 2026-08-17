@@ -4,6 +4,7 @@ import asyncio
 import html
 import logging
 import os
+import signal
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -430,6 +431,27 @@ async def connect_userbot(userbot: Any) -> None:
     await asyncio.wait_for(userbot.connect(), timeout=30)
 
 
+def build_userbot(settings: Settings) -> Any:
+    from telethon import TelegramClient
+
+    live = load_live_session(settings.session_string)
+    if live:
+        settings.session_string = live
+    return TelegramClient(
+        settings.telethon_session(),
+        settings.api_id,
+        settings.api_hash,
+        proxy=settings.telethon_proxy(),
+        device_model="Desktop",
+        system_version="Windows 10",
+        app_version="5.0",
+        connection_retries=5,
+        timeout=30,
+        use_ipv6=False,
+        flood_sleep_threshold=24 * 60 * 60,
+    )
+
+
 def acquire_userbot_lock():
     path = Path(os.getenv("DATA_DIR", "data")) / "userbot.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -462,7 +484,7 @@ async def authorize_userbot(userbot: Any) -> str | None:
         await asyncio.wait_for(userbot(functions.updates.GetStateRequest()), timeout=30)
         return None
     except errors.AuthKeyDuplicatedError:
-        log.warning("AuthKeyDuplicated — сразу новый вход")
+        log.warning("AuthKeyDuplicated — старый контейнер ещё в сети, жду")
         try:
             await userbot.disconnect()
         except Exception:
@@ -483,7 +505,11 @@ async def authorize_userbot(userbot: Any) -> str | None:
             return None
         except Exception as retry_exc:
             return f"{type(retry_exc).__name__}: {retry_exc}"
-    except errors.RPCError as exc:
+    except (errors.RPCError, OSError, ConnectionError, asyncio.TimeoutError) as exc:
+        try:
+            await userbot.disconnect()
+        except Exception:
+            pass
         return f"{type(exc).__name__}: {exc}"
     except Exception as exc:
         log.exception("GetState упал")
@@ -491,8 +517,6 @@ async def authorize_userbot(userbot: Any) -> str | None:
 
 
 async def run_userbot(settings: Settings) -> None:
-    from telethon import TelegramClient
-
     from nft_parser.gifts import GiftService
     from nft_parser.marketplace import Marketplace
     from nft_parser.scanner import ChatScanner, CheckQueue
@@ -506,23 +530,7 @@ async def run_userbot(settings: Settings) -> None:
     if lock_fp is None:
         log.error("Юзербот уже запущен в другом процессе этого контейнера")
 
-    live = load_live_session(settings.session_string)
-    if live:
-        settings.session_string = live
-
-    userbot = TelegramClient(
-        settings.telethon_session(),
-        settings.api_id,
-        settings.api_hash,
-        proxy=settings.telethon_proxy(),
-        device_model="Desktop",
-        system_version="Windows 10",
-        app_version="5.0",
-        connection_retries=5,
-        timeout=30,
-        use_ipv6=False,
-        flood_sleep_threshold=24 * 60 * 60,
-    )
+    userbot = build_userbot(settings)
     bot = make_bot(settings.bot_token)
     dp = Dispatcher()
     queue = CheckQueue(settings.check_delay_sec)
@@ -555,6 +563,19 @@ async def run_userbot(settings: Settings) -> None:
     dp.message.middleware(middleware)
     dp.callback_query.middleware(middleware)
     dp.include_router(router)
+    stop_event = asyncio.Event()
+
+    def _ask_stop(*_args: object) -> None:
+        if not stop_event.is_set():
+            log.info("Контейнер останавливают — отключаю юзербота")
+            stop_event.set()
+
+    def _bind_client(client: Any) -> None:
+        nonlocal userbot
+        userbot = client
+        app.userbot = client
+        scanner.client = client
+        gifts.client = client
 
     async def login_userbot() -> None:
         log.info("Логин юзербота…")
@@ -567,9 +588,12 @@ async def run_userbot(settings: Settings) -> None:
                 )
                 return
             if settings.session_string.strip():
+                if os.getenv("DATA_DIR"):
+                    log.info("Bothost рестарт: 20с жду, пока Telegram отпустит старый коннект")
+                    await asyncio.sleep(20)
                 log.info("SESSION_STRING длина=%s", len(settings.session_string.strip()))
                 noticed = False
-                while True:
+                while not stop_event.is_set():
                     why = await authorize_userbot(userbot)
                     if not why:
                         break
@@ -578,12 +602,19 @@ async def run_userbot(settings: Settings) -> None:
                         await userbot.disconnect()
                     except Exception:
                         pass
+                    wait = 20
+                    if any(part in why for part in ("AuthKey", "Timeout", "Connect", "Network", "OSError")):
+                        wait = 75
                     if not noticed:
                         await notifier.send_direct(
-                            "Юзербот оффлайн, жду сессию. QR не отправляю — карточки пойдут сами, как только коннект оживёт."
+                            "Bothost перезапустился, Telegram ещё держит старый коннект. "
+                            "Жду сеть, QR не отправляю."
                         )
                         noticed = True
-                    await asyncio.sleep(20)
+                    await asyncio.sleep(wait)
+                    _bind_client(build_userbot(settings))
+                if stop_event.is_set():
+                    return
                 await asyncio.wait_for(userbot.start(), timeout=45)
                 try:
                     saved = userbot.session.save()
@@ -630,6 +661,26 @@ async def run_userbot(settings: Settings) -> None:
         )
         await asyncio.gather(_worker(app), _market(app), _bootstrap(app, me, scanner, db, notifier))
 
+    async def watch_stop() -> None:
+        await stop_event.wait()
+        try:
+            await dp.stop_polling()
+        except Exception:
+            pass
+        try:
+            await userbot.disconnect()
+        except Exception:
+            pass
+
+    loop = asyncio.get_running_loop()
+    for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGINT", None)):
+        if sig is None:
+            continue
+        try:
+            loop.add_signal_handler(sig, _ask_stop)
+        except NotImplementedError:
+            signal.signal(sig, _ask_stop)
+
     log.info("Стартую панель бота…")
     try:
         await asyncio.gather(
@@ -637,12 +688,17 @@ async def run_userbot(settings: Settings) -> None:
             notifier.pace_loop(),
             login_userbot(),
             bothost_health(),
+            watch_stop(),
         )
     finally:
+        _ask_stop()
         await app.feed.close()
         await market.close()
         await bot.session.close()
-        await userbot.disconnect()
+        try:
+            await userbot.disconnect()
+        except Exception:
+            pass
         await db.close()
         if lock_fp is not None:
             try:
