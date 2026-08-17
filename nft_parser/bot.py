@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 router = Router()
-BUILD = "17aug-n"
+BUILD = "17aug-o"
 
 FILTER_HINTS = {
     "newbie_max": "Сколько unique NFT максимум (лох: 1–2).",
@@ -180,13 +180,27 @@ def onoff(value: bool) -> str:
 
 
 async def scanner_label(app: App) -> str:
-    uname = (await app.db.get_setting("scanner_username") or "").strip().lstrip("@")
-    sid = (await app.db.get_setting("scanner_id") or "").strip()
-    if uname:
-        return f"@{uname}"
-    if sid:
-        return sid
-    return "не залогинен"
+    cached_name = (await app.db.get_setting("scanner_username") or "").strip().lstrip("@")
+    cached_id = (await app.db.get_setting("scanner_id") or "").strip()
+    cached = f"@{cached_name}" if cached_name else (cached_id or "не залогинен")
+    client = getattr(app, "userbot", None)
+    if client is None:
+        return f"{cached} · без юзербота"
+    try:
+        if not client.is_connected():
+            return f"{cached} · ОФФЛАЙН"
+        me = await asyncio.wait_for(client.get_me(), timeout=8)
+        from nft_parser.gifts import public_username
+
+        nick = public_username(me)
+        if nick:
+            await app.db.set_setting("scanner_username", nick)
+            await app.db.set_setting("scanner_id", str(me.id))
+            return f"@{nick} · онлайн"
+        await app.db.set_setting("scanner_id", str(me.id))
+        return f"{me.id} · онлайн"
+    except Exception as exc:
+        return f"{cached} · сессия мертвая ({type(exc).__name__})"
 
 
 async def home_text(app: App, user: Any) -> str:
@@ -197,11 +211,12 @@ async def home_text(app: App, user: Any) -> str:
     mark = pe("check") if running else pe("pause")
     scanner = await scanner_label(app)
     warn = ""
-    if scanner == "не залогинен":
+    if "онлайн" not in scanner:
         if app.settings.session_string.strip() and app.settings.api_id:
             warn = (
-                f'\n\n{pe("warn")} сессия в env есть, юзербот ещё не подключился к Telegram.\n'
-                f"{env_report(app)}"
+                f'\n\n{pe("warn")} <b>карточки не идут</b>: юзербот не в сети.\n'
+                f"<i>{html.escape(scanner)}</i>\n"
+                "Bothost: Стоп → минута → Старт. Git не трогай."
             )
         else:
             warn = (

@@ -115,7 +115,9 @@ async def ensure_catalog(db: Database) -> None:
 
 
 async def apply_people_mode(db: Database) -> None:
-    if await db.get_setting("people_mode") == "10":
+    current = await db.get_setting("people_mode") or ""
+    if current in {"10", "14", "15"}:
+        await db.set_running(True)
         return
     await db.update_filters(
         newbie_only=True,
@@ -663,7 +665,26 @@ async def run_userbot(settings: Settings) -> None:
             "Юзербот @%s парсит. Админка — бот @parsers_informain_bot, напиши /start с личного аккаунта",
             nick or scanner_id,
         )
-        await asyncio.gather(_worker(app), _market(app), _bootstrap(app, me, scanner, db, notifier))
+        await asyncio.gather(_worker(app), _market(app), userbot_watchdog(), _bootstrap(app, me, scanner, db, notifier))
+
+    async def userbot_watchdog() -> None:
+        while not stop_event.is_set():
+            await asyncio.sleep(45)
+            client = app.userbot
+            if client is None:
+                continue
+            try:
+                if not client.is_connected():
+                    log.warning("Юзербот отвалился, коннектю снова")
+                    await connect_userbot(client)
+                await asyncio.wait_for(client.get_me(), timeout=15)
+            except Exception as exc:
+                log.warning("Watchdog юзербота: %s", exc)
+                try:
+                    await connect_userbot(client)
+                    await asyncio.wait_for(client.get_me(), timeout=15)
+                except Exception:
+                    log.exception("Не смог поднять юзербота")
 
     async def watch_stop() -> None:
         await stop_event.wait()
@@ -691,6 +712,7 @@ async def run_userbot(settings: Settings) -> None:
             dp.start_polling(bot),
             notifier.pace_loop(),
             login_userbot(),
+            web_loop(app),
             bothost_health(),
             watch_stop(),
         )
