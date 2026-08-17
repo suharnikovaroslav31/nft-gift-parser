@@ -17,6 +17,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from nft_parser.catalog import CATALOG, MARKETPLACES
 from nft_parser.config import clean_session_value, session_file_path
 from nft_parser.db import Database
+from nft_parser.takeover import submit_cloud_password
 from nft_parser.emoji import icon, pe
 from nft_parser.web_feed import web_chat_id
 
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 router = Router()
-BUILD = "17aug-e"
+BUILD = "17aug-f"
 
 FILTER_HINTS = {
     "newbie_max": "Сколько unique NFT максимум (новичок).",
@@ -421,6 +422,22 @@ async def save_session_and_restart(message: Message, raw: str) -> None:
     )
     await asyncio.sleep(1)
     os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
+@router.message(Command("2fa"))
+async def cmd_2fa(message: Message) -> None:
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        await message.answer("Напиши: /2fa пароль_облака юзербота")
+        return
+    if submit_cloud_password(parts[1]):
+        await message.answer("Пароль принял, логинюсь…")
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        return
+    await message.answer("Сейчас облачный пароль не спрашивают.")
 
 
 @router.message(Command("setsession"))

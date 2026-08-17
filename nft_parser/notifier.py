@@ -304,3 +304,18 @@ class Notifier:
 
     async def send_text(self, text: str) -> None:
         await self._broadcast(text, preview=False)
+
+    async def send_direct(self, text: str) -> list[tuple[int, int]]:
+        posted: list[tuple[int, int]] = []
+        for admin_id in await self.recipients():
+            try:
+                message = await self.bot.send_message(
+                    admin_id,
+                    text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                posted.append((admin_id, message.message_id))
+            except Exception:
+                log.exception("Не отправил прямое сообщение %s", admin_id)
+        return posted

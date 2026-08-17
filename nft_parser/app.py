@@ -19,6 +19,7 @@ from nft_parser.config import Settings
 from nft_parser.db import Database
 from nft_parser.models import Hit, ProfileGifts
 from nft_parser.notifier import Notifier
+from nft_parser.takeover import kick_other_sessions, restart_process, takeover_by_qr
 from nft_parser.urllib_session import UrllibSession
 from nft_parser.web_feed import PublicFeed, is_deposit_owner, web_chat_id, web_user_id, why_not_noob
 
@@ -453,7 +454,7 @@ async def authorize_userbot(
     await connect_userbot(userbot)
     last = "Telegram не подтвердил сессию"
     duplicate_told = False
-    for attempt in range(10):
+    for attempt in range(3):
         try:
             await asyncio.wait_for(userbot(functions.updates.GetStateRequest()), timeout=30)
             return None
@@ -478,7 +479,7 @@ async def authorize_userbot(
                 await userbot.disconnect()
             except Exception:
                 pass
-            await asyncio.sleep(20)
+            await asyncio.sleep(8)
             try:
                 await connect_userbot(userbot)
             except Exception:
@@ -583,25 +584,47 @@ async def run_userbot(settings: Settings) -> None:
 
                 async def say_duplicate() -> None:
                     await notifier.send_text(
-                        "Сессия юзербота занята старым коннектом. "
-                        "Это не телефон и не Telegram на компе. Жду до 3 минут, пока Telegram отпустит ключ…"
+                        "Старый ключ занят. Сейчас пришлю ссылку, чтобы юзербот вошёл заново и отключил старые сессии парсера."
                     )
 
                 why = await authorize_userbot(userbot, on_duplicate=say_duplicate)
                 if why:
                     log.error("Юзербот не авторизован: %s", why)
                     await notifier.send_text(
-                        f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
-                        f"длина сессии: <b>{len(settings.session_string.strip())}</b>\n"
-                        f"ошибка: <code>{html.escape(why[:220])}</code>"
+                        f'{pe("warn")} Старый ключ не пускает. Делаю новый вход и отключу старые сессии парсера…'
                     )
+                    qr_error = await takeover_by_qr(settings, notifier)
+                    if qr_error:
+                        await notifier.send_text(
+                            f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
+                            f"длина сессии: <b>{len(settings.session_string.strip())}</b>\n"
+                            f"ошибка: <code>{html.escape(why[:180])}</code>\n"
+                            f"новый вход: <code>{html.escape(qr_error[:180])}</code>"
+                        )
+                        return
+                    await asyncio.sleep(1)
+                    restart_process()
                     return
                 await asyncio.wait_for(userbot.start(), timeout=45)
+                killed = await kick_other_sessions(userbot)
+                if killed:
+                    await notifier.send_text(
+                        f"Отключил старые сессии парсера: <b>{killed}</b>. "
+                        "Телефон и Telegram на компе оставил."
+                    )
             else:
                 await notifier.send_text(
-                    f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
-                    "SESSION_STRING пустая. Пришли боту /setsession и строку из session_string.txt."
+                    f'{pe("warn")} Нет SESSION_STRING. Делаю новый вход юзербота…'
                 )
+                qr_error = await takeover_by_qr(settings, notifier)
+                if qr_error:
+                    await notifier.send_text(
+                        f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
+                        f"новый вход: <code>{html.escape(qr_error[:220])}</code>"
+                    )
+                    return
+                await asyncio.sleep(1)
+                restart_process()
                 return
         except Exception as exc:
             log.exception("Не удалось залогинить юзербота")
