@@ -375,10 +375,11 @@ async def run(settings: Settings) -> None:
     log.info("Бот: @%s", bot_me.username)
     await app.notifier.send_text(
         f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
-        "Админка бота работает, карточки парсера не идут.\n"
-        "В Bothost добавь <code>SESSION_STRING</code>, <code>API_ID</code>, "
-        "<code>API_HASH</code> и сделай передеплой.\n"
-        "Потом /start с личного аккаунта."
+        "Админка работает, парсер нет.\n"
+        f"API_ID: <b>{'есть' if settings.api_id else 'нет'}</b>\n"
+        f"API_HASH: <b>{'есть' if settings.api_hash else 'нет'}</b>\n"
+        f"SESSION_STRING: <b>{'есть (' + str(len(settings.session_string.strip())) + ' симв.)' if settings.session_string.strip() else 'нет'}</b>\n"
+        "Если SESSION_STRING «нет» — вставь её в env Bothost целиком и передеплой."
     )
     try:
         await asyncio.gather(
@@ -391,6 +392,30 @@ async def run(settings: Settings) -> None:
         await app.feed.close()
         await app.bot.session.close()
         await app.db.close()
+
+
+TG_DC = {
+    1: ("149.154.175.53", 443),
+    2: ("149.154.167.51", 443),
+    3: ("149.154.175.100", 443),
+    4: ("149.154.167.91", 443),
+    5: ("91.108.56.130", 443),
+}
+
+
+async def connect_userbot(userbot: Any) -> None:
+    try:
+        await asyncio.wait_for(userbot.connect(), timeout=30)
+        return
+    except Exception:
+        log.warning("Первый коннект юзербота не прошёл, пробую официальный DC")
+    dc = int(getattr(userbot.session, "dc_id", 0) or 2)
+    ip, port = TG_DC.get(dc, TG_DC[2])
+    try:
+        userbot.session.set_dc(dc, ip, port)
+    except Exception:
+        log.exception("Не сменил DC")
+    await asyncio.wait_for(userbot.connect(), timeout=30)
 
 
 async def run_userbot(settings: Settings) -> None:
@@ -413,6 +438,8 @@ async def run_userbot(settings: Settings) -> None:
         device_model="Desktop",
         system_version="Windows 10",
         app_version="5.0",
+        connection_retries=5,
+        timeout=30,
     )
     bot = make_bot(settings.bot_token)
     dp = Dispatcher()
@@ -451,17 +478,23 @@ async def run_userbot(settings: Settings) -> None:
         log.info("Логин юзербота…")
         try:
             if settings.session_string.strip():
-                await asyncio.wait_for(userbot.connect(), timeout=45)
+                log.info("SESSION_STRING длина=%s", len(settings.session_string.strip()))
+                await connect_userbot(userbot)
                 if not await userbot.is_user_authorized():
                     log.error("SESSION_STRING недействительна")
                     await notifier.send_text(
                         f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
-                        "SESSION_STRING недействительна. Сгенерируй заново и передеплой."
+                        "SESSION_STRING дошла, но Telegram её не принял.\n"
+                        f"длина сессии: <b>{len(settings.session_string.strip())}</b>"
                     )
                     return
-                await userbot.start()
+                await asyncio.wait_for(userbot.start(), timeout=45)
             else:
-                await asyncio.wait_for(userbot.start(phone=settings.phone or None), timeout=45)
+                await notifier.send_text(
+                    f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
+                    "SESSION_STRING пустая. Добавь её в Bothost и передеплой."
+                )
+                return
         except Exception:
             log.exception("Не удалось залогинить юзербота")
             try:

@@ -154,6 +154,20 @@ async def safe_edit(target: CallbackQuery | Message, text: str, markup: InlineKe
             await target.answer("Обновляю…", show_alert=False)
 
 
+def env_report(app: App) -> str:
+    settings = app.settings
+    session_len = len(settings.session_string.strip())
+    api = bool(settings.api_id)
+    digest = bool(settings.api_hash)
+    session = f"есть ({session_len} симв.)" if session_len else "нет"
+    return (
+        f"API_ID: <b>{'есть' if api else 'нет'}</b>\n"
+        f"API_HASH: <b>{'есть' if digest else 'нет'}</b>\n"
+        f"SESSION_STRING: <b>{session}</b>\n"
+        f"PHONE: <b>{'есть' if settings.phone else 'нет'}</b>"
+    )
+
+
 def onoff(value: bool) -> str:
     return "вкл" if value else "выкл"
 
@@ -177,11 +191,17 @@ async def home_text(app: App, user: Any) -> str:
     scanner = await scanner_label(app)
     warn = ""
     if scanner == "не залогинен":
-        warn = (
-            f'\n\n{pe("warn")} <b>карточки не идут</b>: юзербот не залогинен.\n'
-            "В Bothost должна быть переменная <code>SESSION_STRING</code>, "
-            "потом передеплой."
-        )
+        if app.settings.session_string.strip() and app.settings.api_id:
+            warn = (
+                f'\n\n{pe("warn")} сессия в env есть, юзербот ещё не подключился к Telegram.\n'
+                f"{env_report(app)}"
+            )
+        else:
+            warn = (
+                f'\n\n{pe("warn")} <b>карточки не идут</b>: нет сессии юзербота.\n'
+                f"{env_report(app)}\n"
+                "В Bothost должна быть переменная <code>SESSION_STRING</code>."
+            )
     return (
         f'{pe("fire")} <b>Gift Hunter</b>\n\n'
         f'{pe("user")} привет, <b>{name}</b>\n'
