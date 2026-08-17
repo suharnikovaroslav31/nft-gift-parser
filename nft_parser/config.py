@@ -23,6 +23,24 @@ def session_file_path() -> Path:
     return Path(os.getenv("DATA_DIR", "data")) / "session_string.txt"
 
 
+def load_live_session(current: str = "") -> str:
+    file_session = ""
+    for path in (
+        session_file_path(),
+        Path("/app/data/session_string.txt"),
+        Path("/usr/src/app/data/session_string.txt"),
+        Path("session_string.txt"),
+    ):
+        try:
+            if path.is_file():
+                file_session = clean_session_value(path.read_text(encoding="utf-8"))
+                if file_session:
+                    break
+        except Exception:
+            continue
+    return file_session or clean_session_value(current)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",

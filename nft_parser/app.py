@@ -15,10 +15,11 @@ from aiogram.enums import ParseMode
 from nft_parser.bot import AppMiddleware, router
 from nft_parser.emoji import pe
 from nft_parser.catalog import CATALOG, tracker_usernames
-from nft_parser.config import Settings
+from nft_parser.config import Settings, load_live_session
 from nft_parser.db import Database
 from nft_parser.models import Hit, ProfileGifts
 from nft_parser.notifier import Notifier
+from nft_parser.takeover import persist_session
 from nft_parser.urllib_session import UrllibSession
 from nft_parser.web_feed import PublicFeed, is_deposit_owner, web_chat_id, web_user_id, why_not_noob
 
@@ -496,6 +497,10 @@ async def run_userbot(settings: Settings) -> None:
     if lock_fp is None:
         log.error("Юзербот уже запущен в другом процессе этого контейнера")
 
+    live = load_live_session(settings.session_string)
+    if live:
+        settings.session_string = live
+
     userbot = TelegramClient(
         settings.telethon_session(),
         settings.api_id,
@@ -554,19 +559,29 @@ async def run_userbot(settings: Settings) -> None:
                 return
             if settings.session_string.strip():
                 log.info("SESSION_STRING длина=%s", len(settings.session_string.strip()))
-                why = await authorize_userbot(userbot)
-                if why:
-                    log.error("Юзербот не авторизован: %s", why)
+                noticed = False
+                while True:
+                    why = await authorize_userbot(userbot)
+                    if not why:
+                        break
+                    log.error("Юзербот оффлайн: %s", why)
                     try:
                         await userbot.disconnect()
                     except Exception:
                         pass
-                    await notifier.send_direct(
-                        f"Юзербот не залогинен: {why}. "
-                        "QR больше не отправляю — сессия уже должна быть в env."
-                    )
-                    return
+                    if not noticed:
+                        await notifier.send_direct(
+                            "Юзербот оффлайн, жду сессию. QR не отправляю — карточки пойдут сами, как только коннект оживёт."
+                        )
+                        noticed = True
+                    await asyncio.sleep(20)
                 await asyncio.wait_for(userbot.start(), timeout=45)
+                try:
+                    saved = userbot.session.save()
+                    if saved:
+                        persist_session(saved)
+                except Exception:
+                    log.exception("Не сохранил живую сессию")
             else:
                 await notifier.send_direct(
                     "Нет SESSION_STRING. Юзербот не парсит. QR больше не отправляю."
