@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 router = Router()
+BUILD = "17aug-d"
 
 FILTER_HINTS = {
     "newbie_max": "Сколько unique NFT максимум (новичок).",
@@ -215,7 +216,8 @@ async def home_text(app: App, user: Any) -> str:
         f'{pe("teddy")} юзербот: <b>{html.escape(scanner)}</b>\n'
         f'{pe("star")} находок: <b>{stats["finds"]}</b> · чатов: <b>{stats["chats"]}</b>'
         f"{warn}\n\n"
-        f'{pe("pin")} разделы: профиль · <b>админ</b> · фильтры · настройки'
+        f'{pe("pin")} разделы: профиль · <b>админ</b> · фильтры · настройки\n'
+        f"<i>сборка {BUILD}</i>"
     )
 
 
