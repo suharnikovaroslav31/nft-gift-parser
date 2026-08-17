@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 router = Router()
-BUILD = "17aug-k"
+BUILD = "17aug-l"
 
 FILTER_HINTS = {
     "newbie_max": "Сколько unique NFT максимум (лох: 1–2).",
@@ -257,7 +257,7 @@ async def admin_text(app: App) -> str:
         f'{pe("pin")} owner id: <code>{html.escape(str(owner))}</code>\n'
         f'{pe("info")} админов: <b>{len(admins)}</b>\n\n'
         f'{pe("graph")} находок: <b>{stats["finds"]}</b> · чатов: <b>{stats["chats"]}</b>\n'
-        f'{pe("teddy")} фильтр: ≤{filters.get("newbie_max", 2)} NFT · lvl ≤{filters.get("max_tg_level", 2)} · свежие 48ч'
+        f'{pe("teddy")} фильтр: ≤{filters.get("newbie_max", 2)} NFT · lvl ≤{filters.get("max_tg_level", 6)} · до {filters.get("max_gift_ton") or 18:g} TON'
     )
 
 
@@ -278,12 +278,12 @@ def admin_kb(running: bool) -> InlineKeyboardMarkup:
 async def filters_text(filters: dict[str, Any]) -> str:
     return (
         f'{pe("search")} <b>Фильтры</b>\n'
-        f"<i>лохи: мало NFT, дешёвый свежий подарок, низкий lvl</i>\n\n"
+        f"<i>лохи: 1–2 NFT, недорого, не трейдеры и не киты</i>\n\n"
         f'{pe("teddy")} unique NFT: <b>≤ {filters.get("newbie_max", 2)}</b>\n'
-        f'{pe("star")} Telegram lvl: <b>≤ {filters.get("max_tg_level", 2)}</b>\n'
-        f'{pe("money")} цена подарка: <b>≤ {filters.get("max_gift_ton") or 6:g} TON</b>\n'
-        f'{pe("graph")} цена в $: <b>≤ {filters.get("max_gift_usd") or 12:g}</b>\n'
-        f'{pe("new")} дешёвый листинг: <b>≤ {filters.get("cheap_list_ton") or 4:g} TON</b>\n\n'
+        f'{pe("star")} Telegram lvl: <b>≤ {filters.get("max_tg_level", 6)}</b>\n'
+        f'{pe("money")} цена подарка: <b>≤ {filters.get("max_gift_ton") or 18:g} TON</b>\n'
+        f'{pe("graph")} цена в $: <b>≤ {filters.get("max_gift_usd") or 40:g}</b>\n'
+        f'{pe("new")} дешёвый листинг: <b>≤ {filters.get("cheap_list_ton") or 12:g} TON</b>\n\n'
         f'{pe("check") if filters.get("newbie_only", True) else pe("cross")} только новички: <b>{onoff(bool(filters.get("newbie_only", True)))}</b>\n'
         f'{pe("check") if filters.get("require_username", True) else pe("cross")} нужен @username: <b>{onoff(bool(filters.get("require_username", True)))}</b>'
     )
@@ -292,10 +292,10 @@ async def filters_text(filters: dict[str, Any]) -> str:
 def filters_kb(filters: dict[str, Any]) -> InlineKeyboardMarkup:
     return kb(
         [btn(f"Макс. NFT · {filters.get('newbie_max', 2)}", "flt:num:newbie_max", key="teddy")],
-        [btn(f"Макс. lvl · {filters.get('max_tg_level', 2)}", "flt:num:max_tg_level", key="star")],
-        [btn(f"Макс. TON · {filters.get('max_gift_ton') or 6}", "flt:num:max_gift_ton", key="money")],
-        [btn(f"Макс. $ · {filters.get('max_gift_usd') or 12}", "flt:num:max_gift_usd", key="graph")],
-        [btn(f"Листинг · {filters.get('cheap_list_ton') or 4} TON", "flt:num:cheap_list_ton", key="new")],
+        [btn(f"Макс. lvl · {filters.get('max_tg_level', 6)}", "flt:num:max_tg_level", key="star")],
+        [btn(f"Макс. TON · {filters.get('max_gift_ton') or 18}", "flt:num:max_gift_ton", key="money")],
+        [btn(f"Макс. $ · {filters.get('max_gift_usd') or 40}", "flt:num:max_gift_usd", key="graph")],
+        [btn(f"Листинг · {filters.get('cheap_list_ton') or 12} TON", "flt:num:cheap_list_ton", key="new")],
         [
             btn(
                 "Новички " + ("✓" if filters.get("newbie_only", True) else "✗"),

@@ -124,16 +124,16 @@ def passes_filters(
     if filters.get("newbie_only") and not is_newbie:
         return False, False, False
 
-    max_level = int(filters.get("max_tg_level") or 2)
+    max_level = int(filters.get("max_tg_level") or 6)
     if profile.tg_level is not None and profile.tg_level > max_level:
         return False, is_newbie, False
 
     if any(is_whale_gift(g.slug, g.title) for g in gifts):
         return False, is_newbie, False
 
-    max_usd = float(filters.get("max_gift_usd") or 12)
-    max_ton = float(filters.get("max_gift_ton") or 6)
-    cheap_list = float(filters.get("cheap_list_ton") or 4)
+    max_usd = float(filters.get("max_gift_usd") or 40)
+    max_ton = float(filters.get("max_gift_ton") or 18)
+    cheap_list = float(filters.get("cheap_list_ton") or 12)
     usd_vals = [g.value_usd for g in gifts if g.value_usd]
     ton_vals = [g.value_ton for g in gifts if g.value_ton]
     listed_vals = [g.listed_ton for g in gifts if g.listed_ton]
@@ -144,17 +144,14 @@ def passes_filters(
     if listed_vals and min(listed_vals) > cheap_list:
         return False, is_newbie, False
 
-    recent_hours = int(filters.get("recent_hours") or 48)
+    recent_hours = int(filters.get("recent_hours") or 168)
     just_bought = bool(extra_gifts)
     now = int(time.time())
     stamps = [stamp for stamp in (to_unix(g.received_at) or 0 for g in gifts) if stamp]
-    if recent_hours > 0:
+    if recent_hours > 0 and stamps:
         cutoff = now - recent_hours * 3600
-        if stamps:
-            just_bought = any(stamp >= cutoff for stamp in stamps)
-            if not just_bought:
-                return False, is_newbie, False
-        elif not extra_gifts:
+        just_bought = any(stamp >= cutoff for stamp in stamps)
+        if not just_bought:
             return False, is_newbie, False
     elif stamps:
         just_bought = just_bought or any(stamp >= now - 24 * 3600 for stamp in stamps)

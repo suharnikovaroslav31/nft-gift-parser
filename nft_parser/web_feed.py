@@ -317,7 +317,8 @@ def why_not_noob(
     price: float,
     asset: str,
     deal_kind: str,
-    max_age_days: int = 2,
+    max_age_days: int = 10,
+    max_price_ton: float = 18,
 ) -> str | None:
     """Почему это не лох. None = похож на лёгкую цель."""
     if looks_like_trader(uname):
@@ -327,17 +328,16 @@ def why_not_noob(
     if deal_kind == "sold":
         return "купил на маркете — уже шарит"
     asset_u = (asset or "").upper()
-    if price and asset_u in {"TON", "$TON"} and price >= 8:
+    if price and asset_u in {"TON", "$TON"} and price > max_price_ton:
         return f"цена {price:g} TON"
-    if price and asset_u == "GRAM" and price >= 6:
+    if price and asset_u == "GRAM" and price > max_price_ton:
         return f"цена {price:g} GRAM"
-    if card.gifted_at is None:
-        return "нет даты Gifted to"
-    age_days = (datetime.now(timezone.utc).timestamp() - card.gifted_at) / 86400
-    if age_days > max_age_days:
-        return f"подарок получен {age_days:.0f} дн. назад"
-    if age_days < 0:
-        return "кривая дата"
+    if card.gifted_at:
+        age_days = (datetime.now(timezone.utc).timestamp() - card.gifted_at) / 86400
+        if age_days > max_age_days:
+            return f"подарок получен {age_days:.0f} дн. назад"
+        if age_days < 0:
+            return "кривая дата"
     if card.gifted_user and card.owner and card.gifted_user.lower() != card.owner.lower():
         return "уже перепродавали, не первый владелец"
     return None

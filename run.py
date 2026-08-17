@@ -115,7 +115,7 @@ def setup_logging() -> None:
 
 
 def main() -> None:
-    print("NFT Gift Hunter boot 17aug-k", flush=True)
+    print("NFT Gift Hunter boot 17aug-l", flush=True)
     hydrate_env()
     setup_logging()
     settings = Settings()

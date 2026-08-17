@@ -135,7 +135,7 @@ async def apply_people_mode(db: Database) -> None:
 
 
 async def apply_userbot_mode(db: Database) -> None:
-    if await db.get_setting("people_mode") == "14":
+    if await db.get_setting("people_mode") == "15":
         await db.set_running(True)
         return
     await db.update_filters(
@@ -146,17 +146,17 @@ async def apply_userbot_mode(db: Database) -> None:
         chats_enabled=True,
         market_enabled=True,
         min_price_ton=0.0,
-        recent_hours=48,
+        recent_hours=168,
         check_senders=True,
         check_gift_links=True,
-        max_tg_level=2,
-        max_gift_usd=12.0,
-        max_gift_ton=6.0,
-        cheap_list_ton=4.0,
+        max_tg_level=6,
+        max_gift_usd=40.0,
+        max_gift_ton=18.0,
+        cheap_list_ton=12.0,
     )
-    await db.set_setting("people_mode", "14")
+    await db.set_setting("people_mode", "15")
     await db.set_running(True)
-    log.info("Лохи: ≤2 NFT, lvl≤2, подарок ≤6 TON / $12, Gifted to за 48ч")
+    log.info("Лохи: ≤2 NFT, lvl≤6, подарок ≤18 TON / $40, без обязательной даты Gifted to")
 
 
 def _min_price_ok(deal_price: float, min_price: float) -> bool:
@@ -236,6 +236,8 @@ async def web_loop(app: App) -> None:
                 filters = await app.db.get_filters()
                 newbie_max = int(filters.get("newbie_max") or 5)
                 newbie_only = bool(filters.get("newbie_only", True))
+                max_age_days = max(1, int(filters.get("recent_hours") or 168) // 24)
+                max_price_ton = float(filters.get("max_gift_ton") or 18)
                 sent = 0
                 scanned = 0
 
@@ -254,7 +256,8 @@ async def web_loop(app: App) -> None:
                             price=float(row["price"] or 0),
                             asset=row["asset"] or "",
                             deal_kind=row["kind"] or "sold",
-                            max_age_days=2,
+                            max_age_days=max_age_days,
+                            max_price_ton=max_price_ton,
                         )
                         if skip:
                             log.info("Пропуск @%s: %s", uname, skip)
@@ -316,7 +319,8 @@ async def web_loop(app: App) -> None:
                                 price=deal.price,
                                 asset=deal.asset,
                                 deal_kind=deal.kind,
-                                max_age_days=2,
+                                max_age_days=max_age_days,
+                                max_price_ton=max_price_ton,
                             )
                             if skip:
                                 log.info("Пропуск @%s: %s", uname, skip)
@@ -342,7 +346,7 @@ async def web_loop(app: App) -> None:
                 log.info("Цикл людей: каналов %s, карточек %s", scanned, sent)
                 if not announced:
                     await app.notifier.send_text(
-                        "🎁 Ищу тех, кто в NFT не шарит: свежий Gifted to, сам владелец, не киты и не маркет."
+                        "🎁 Ищу лохов: 1–2 дешёвых NFT, сами владельцы, без китов и без маркета."
                     )
                     announced = True
         except Exception:
