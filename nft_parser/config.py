@@ -3,21 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from typing import Any
-
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-def _env(*names: str) -> str:
-    for name in names:
-        raw = os.environ.get(name)
-        if raw is None:
-            continue
-        value = raw.strip().strip('"').strip("'").replace("\r", "").replace("\n", "")
-        if value:
-            return value
-    return ""
 
 
 class Settings(BaseSettings):
@@ -25,24 +12,14 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
-        populate_by_name=True,
         case_sensitive=False,
     )
 
     bot_token: str
-    api_id: int | None = Field(
-        default=None,
-        validation_alias=AliasChoices("API_ID", "TELEGRAM_API_ID", "api_id"),
-    )
-    api_hash: str = Field(
-        default="",
-        validation_alias=AliasChoices("API_HASH", "TELEGRAM_API_HASH", "api_hash"),
-    )
+    api_id: int | None = None
+    api_hash: str = ""
     phone: str = ""
-    session_string: str = Field(
-        default="",
-        validation_alias=AliasChoices("SESSION_STRING", "STRING_SESSION", "session_string"),
-    )
+    session_string: str = ""
     admin_ids: str = ""
     portals_auth: str = ""
     tonnel_auth: str = ""
@@ -66,30 +43,6 @@ class Settings(BaseSettings):
             if part.isdigit():
                 ids.append(int(part))
         return ids
-
-    @model_validator(mode="before")
-    @classmethod
-    def pull_os_env(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        mapping = {
-            "bot_token": ("BOT_TOKEN",),
-            "api_id": ("API_ID", "TELEGRAM_API_ID"),
-            "api_hash": ("API_HASH", "TELEGRAM_API_HASH"),
-            "phone": ("PHONE",),
-            "session_string": ("SESSION_STRING", "STRING_SESSION"),
-            "admin_ids": ("ADMIN_IDS",),
-            "portals_auth": ("PORTALS_AUTH",),
-            "tonnel_auth": ("TONNEL_AUTH",),
-        }
-        for field, names in mapping.items():
-            current = data.get(field)
-            if current not in (None, ""):
-                continue
-            value = _env(*names)
-            if value:
-                data[field] = value
-        return data
 
     @field_validator("api_id", mode="before")
     @classmethod
@@ -126,9 +79,9 @@ class Settings(BaseSettings):
     def has_userbot(self) -> bool:
         if not (self.api_id and self.api_hash):
             return False
-        if os.getenv("DATA_DIR"):
-            return bool(self.session_string.strip())
-        return bool(self.phone or self.session_string.strip())
+        if self.session_string.strip():
+            return True
+        return bool(self.phone) and not os.getenv("DATA_DIR")
 
     def telethon_session(self):
         if self.session_string.strip():

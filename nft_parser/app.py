@@ -23,6 +23,41 @@ from nft_parser.web_feed import PublicFeed, is_deposit_owner, web_chat_id, web_u
 log = logging.getLogger(__name__)
 
 
+def make_bot(token: str) -> Bot:
+    kwargs: dict[str, Any] = {
+        "default": DefaultBotProperties(parse_mode=ParseMode.HTML),
+    }
+    if not os.getenv("DATA_DIR") and not os.getenv("PORT"):
+        kwargs["session"] = UrllibSession()
+    return Bot(token, **kwargs)
+
+
+async def bothost_health() -> None:
+    raw = (os.getenv("PORT") or "").strip()
+    if not raw.isdigit():
+        log.info("PORT нет — health-сервер не поднимаю")
+        await asyncio.Future()
+        return
+    port = int(raw)
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            await reader.read(4096)
+            body = b"ok"
+            writer.write(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+                b"Content-Length: 2\r\nConnection: close\r\n\r\n" + body
+            )
+            await writer.drain()
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handle, "0.0.0.0", port)
+    log.info("Bothost health 0.0.0.0:%s", port)
+    async with server:
+        await server.serve_forever()
+
+
 @dataclass
 class App:
     settings: Settings
@@ -44,11 +79,7 @@ async def build_web_app(settings: Settings) -> App:
     for admin_id in settings.admin_id_list():
         await db.add_admin(admin_id)
 
-    bot = Bot(
-        settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        session=UrllibSession(),
-    )
+    bot = make_bot(settings.bot_token)
     dp = Dispatcher()
     notifier = Notifier(bot, db, settings.admin_id_list())
     feed = PublicFeed()
@@ -354,6 +385,7 @@ async def run(settings: Settings) -> None:
             app.dp.start_polling(app.bot, polling_timeout=0, handle_signals=False),
             web_loop(app),
             app.notifier.pace_loop(),
+            bothost_health(),
         )
     finally:
         await app.feed.close()
@@ -382,11 +414,7 @@ async def run_userbot(settings: Settings) -> None:
         system_version="Windows 10",
         app_version="5.0",
     )
-    bot = Bot(
-        settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        session=UrllibSession(),
-    )
+    bot = make_bot(settings.bot_token)
     dp = Dispatcher()
     queue = CheckQueue(settings.check_delay_sec)
     gifts = GiftService(userbot, max_gifts=settings.max_gifts_fetch)
@@ -472,6 +500,7 @@ async def run_userbot(settings: Settings) -> None:
             dp.start_polling(bot),
             notifier.pace_loop(),
             login_userbot(),
+            bothost_health(),
         )
     finally:
         await app.feed.close()
