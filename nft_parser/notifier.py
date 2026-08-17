@@ -19,38 +19,74 @@ from nft_parser.models import Hit, TrackEvent
 
 log = logging.getLogger(__name__)
 
+CLAIM_MARK = "\n\nзанял:"
+
 
 def _esc(text: str | None) -> str:
     return html.escape(text or "")
 
 
-def hit_keyboard(hit: Hit) -> InlineKeyboardMarkup | None:
+def apply_claim_footer(body: str, claim: dict | None) -> str:
+    base = body.split(CLAIM_MARK, 1)[0].rstrip()
+    if not claim:
+        return base
+    return (
+        f"{base}{CLAIM_MARK} <b>{_esc(str(claim.get('by_name') or ''))}</b> "
+        "— ему уже пишут, не перехватывай"
+    )
+
+
+def lead_keyboard(
+    target_id: int,
+    username: str | None,
+    gift_url: str | None,
+    claim: dict | None = None,
+) -> InlineKeyboardMarkup | None:
     rows: list[list[InlineKeyboardButton]] = []
-    profile = hit.profile
-    if profile.username:
+    uname = (username or "").strip().lstrip("@")
+    if uname:
         rows.append(
             [
                 InlineKeyboardButton(
                     text="Профиль",
-                    url=f"https://t.me/{profile.username}",
+                    url=f"https://t.me/{uname}",
                     icon_custom_emoji_id=icon("user"),
                 )
             ]
         )
-    gift = next((g for g in profile.unique if g.link), None)
-    if gift and gift.link:
+    if gift_url:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=(gift.label[:34] + "…") if len(gift.label) > 34 else gift.label,
-                    url=gift.link,
+                    text="Подарок",
+                    url=gift_url,
                     icon_custom_emoji_id=icon("gift"),
+                )
+            ]
+        )
+    if target_id:
+        if claim:
+            label = f"Занято · {str(claim.get('by_name') or '')[:18]}"
+        else:
+            label = "Занять"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=label,
+                    callback_data=f"claim:{target_id}",
+                    icon_custom_emoji_id=icon("check"),
                 )
             ]
         )
     if not rows:
         return None
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def hit_keyboard(hit: Hit, claim: dict | None = None) -> InlineKeyboardMarkup | None:
+    profile = hit.profile
+    gift = next((g for g in profile.unique if g.link), None)
+    return lead_keyboard(profile.user_id, profile.username, gift.link if gift else "", claim)
 
 
 def _user_block(profile) -> str:
@@ -149,6 +185,9 @@ class _Outgoing:
     text: str
     preview: bool
     markup: InlineKeyboardMarkup | None = None
+    target_id: int = 0
+    username: str = ""
+    gift_url: str = ""
 
 
 class Notifier:
@@ -180,7 +219,14 @@ class Notifier:
                 wait = delay - (time.monotonic() - self._last_send)
                 if wait > 0:
                     await asyncio.sleep(wait)
-            await self._broadcast(item.text, item.preview, item.markup)
+            await self._broadcast(
+                item.text,
+                item.preview,
+                item.markup,
+                target_id=item.target_id,
+                username=item.username,
+                gift_url=item.gift_url,
+            )
             self._last_send = time.monotonic()
 
     async def _enqueue(
@@ -188,10 +234,20 @@ class Notifier:
         text: str,
         preview: bool,
         markup: InlineKeyboardMarkup | None = None,
+        target_id: int = 0,
+        username: str = "",
+        gift_url: str = "",
     ) -> None:
         delay = await self.notify_delay()
         if delay <= 0 and self._out.empty():
-            await self._broadcast(text, preview, markup)
+            await self._broadcast(
+                text,
+                preview,
+                markup,
+                target_id=target_id,
+                username=username,
+                gift_url=gift_url,
+            )
             self._last_send = time.monotonic()
             return
         dropped = 0
@@ -203,7 +259,9 @@ class Notifier:
                 break
         if dropped:
             log.warning("Очередь карточек переполнена, сбросил старые: %s", dropped)
-        await self._out.put(_Outgoing(text, preview, markup))
+        await self._out.put(
+            _Outgoing(text, preview, markup, target_id, username, gift_url)
+        )
 
     async def recipients(self) -> list[int]:
         admins = await self.db.list_admins()
@@ -221,7 +279,13 @@ class Notifier:
         return out
 
     async def send_hit(self, hit: Hit) -> None:
-        text = format_hit(hit)
+        target_id = int(hit.profile.user_id or 0)
+        claim = await self.db.get_claim(target_id) if target_id else None
+        body = format_hit(hit)
+        text = apply_claim_footer(body, claim)
+        gift = next((g for g in hit.profile.unique if g.link), None)
+        gift_url = gift.link if gift else ""
+        username = hit.profile.username or ""
         gifts_payload = [
             {
                 "title": g.title,
@@ -245,7 +309,14 @@ class Notifier:
             hit.profile.total_unique,
             hit.source_label,
         )
-        await self._enqueue(text, preview=True, markup=hit_keyboard(hit))
+        await self._enqueue(
+            text,
+            preview=True,
+            markup=hit_keyboard(hit, claim),
+            target_id=target_id,
+            username=username,
+            gift_url=gift_url,
+        )
 
     async def send_track(self, event: TrackEvent) -> None:
         text = format_track(event)
@@ -264,16 +335,29 @@ class Notifier:
         text: str,
         preview: bool,
         markup: InlineKeyboardMarkup | None = None,
+        target_id: int = 0,
+        username: str = "",
+        gift_url: str = "",
     ) -> None:
         for admin_id in await self.recipients():
             try:
-                await self.bot.send_message(
+                message = await self.bot.send_message(
                     admin_id,
                     text,
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=not preview,
                     reply_markup=markup,
                 )
+                if target_id and message:
+                    body = text.split(CLAIM_MARK, 1)[0].rstrip()
+                    await self.db.save_card_message(
+                        target_id,
+                        admin_id,
+                        message.message_id,
+                        body,
+                        username,
+                        gift_url,
+                    )
             except Exception as exc:
                 if markup is not None:
                     try:
@@ -301,6 +385,30 @@ class Notifier:
                     except Exception:
                         pass
                 log.warning("Не смог отправить %s: %s", admin_id, exc)
+
+    async def refresh_claim_cards(self, target_id: int) -> None:
+        claim = await self.db.get_claim(target_id)
+        for row in await self.db.list_card_messages(target_id):
+            text = apply_claim_footer(row["body"], claim)
+            markup = lead_keyboard(target_id, row["username"], row["gift_url"], claim)
+            try:
+                await self.bot.edit_message_text(
+                    text,
+                    chat_id=row["chat_id"],
+                    message_id=row["message_id"],
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                    reply_markup=markup,
+                )
+            except Exception:
+                try:
+                    await self.bot.edit_message_reply_markup(
+                        chat_id=row["chat_id"],
+                        message_id=row["message_id"],
+                        reply_markup=markup,
+                    )
+                except Exception:
+                    log.exception("Не обновил карточку %s/%s", row["chat_id"], row["message_id"])
 
     async def send_text(self, text: str) -> None:
         await self._broadcast(text, preview=False)

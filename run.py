@@ -93,7 +93,7 @@ def hydrate_env() -> None:
             file_session = clean_session_value(path.read_text(encoding="utf-8"))
             if file_session:
                 break
-    best = max((item for item in (env_session, joined, file_session) if item), key=len, default="")
+    best = file_session or env_session or joined
     if best:
         os.environ["SESSION_STRING"] = best
 
@@ -115,7 +115,7 @@ def setup_logging() -> None:
 
 
 def main() -> None:
-    print("NFT Gift Hunter boot 17aug-h", flush=True)
+    print("NFT Gift Hunter boot 17aug-i", flush=True)
     hydrate_env()
     setup_logging()
     settings = Settings()

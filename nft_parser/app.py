@@ -19,7 +19,6 @@ from nft_parser.config import Settings
 from nft_parser.db import Database
 from nft_parser.models import Hit, ProfileGifts
 from nft_parser.notifier import Notifier
-from nft_parser.takeover import kick_other_sessions, restart_process, takeover_by_qr
 from nft_parser.urllib_session import UrllibSession
 from nft_parser.web_feed import PublicFeed, is_deposit_owner, web_chat_id, web_user_id, why_not_noob
 
@@ -563,39 +562,15 @@ async def run_userbot(settings: Settings) -> None:
                     except Exception:
                         pass
                     await notifier.send_direct(
-                        "Старый ключ юзербота занят. Делаю новую ссылку входа. "
-                        "Телефон и Telegram на компе не трогаю."
+                        f"Юзербот не залогинен: {why}. "
+                        "QR больше не отправляю — сессия уже должна быть в env."
                     )
-                    qr_error = await takeover_by_qr(settings, notifier)
-                    if qr_error:
-                        await notifier.send_text(
-                            f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
-                            f"длина сессии: <b>{len(settings.session_string.strip())}</b>\n"
-                            f"ошибка: <code>{html.escape(why[:180])}</code>\n"
-                            f"новый вход: <code>{html.escape(qr_error[:180])}</code>"
-                        )
-                        return
-                    await asyncio.sleep(1)
-                    restart_process()
                     return
                 await asyncio.wait_for(userbot.start(), timeout=45)
-                killed = await kick_other_sessions(userbot)
-                if killed:
-                    await notifier.send_text(
-                        f"Отключил старые сессии парсера: <b>{killed}</b>. "
-                        "Телефон и Telegram на компе оставил."
-                    )
             else:
-                await notifier.send_direct("Нет SESSION_STRING. Делаю новую ссылку входа юзербота.")
-                qr_error = await takeover_by_qr(settings, notifier)
-                if qr_error:
-                    await notifier.send_text(
-                        f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
-                        f"новый вход: <code>{html.escape(qr_error[:220])}</code>"
-                    )
-                    return
-                await asyncio.sleep(1)
-                restart_process()
+                await notifier.send_direct(
+                    "Нет SESSION_STRING. Юзербот не парсит. QR больше не отправляю."
+                )
                 return
         except Exception as exc:
             log.exception("Не удалось залогинить юзербота")
@@ -604,8 +579,7 @@ async def run_userbot(settings: Settings) -> None:
                 await notifier.send_text(
                     f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
                     "Панель бота работает, парсер нет.\n"
-                    f"ошибка: <code>{err}</code>\n"
-                    "Можно прислать /setsession и строку из session_string.txt."
+                    f"ошибка: <code>{err}</code>"
                 )
             except Exception:
                 pass

@@ -83,6 +83,22 @@ class Database:
                 tries INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS claims (
+                target_id INTEGER PRIMARY KEY,
+                by_id INTEGER NOT NULL,
+                by_name TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS card_messages (
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                body TEXT NOT NULL DEFAULT '',
+                username TEXT NOT NULL DEFAULT '',
+                gift_url TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (chat_id, message_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_card_target ON card_messages(target_id);
             """
         )
         await self._db.commit()
@@ -432,3 +448,65 @@ class Database:
     async def drop_pending_owner(self, slug: str) -> None:
         await self.db.execute("DELETE FROM pending_owners WHERE slug = ?", (slug,))
         await self.db.commit()
+
+    async def get_claim(self, target_id: int) -> dict[str, Any] | None:
+        cur = await self.db.execute(
+            "SELECT target_id, by_id, by_name, created_at FROM claims WHERE target_id = ?",
+            (target_id,),
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def set_claim(self, target_id: int, by_id: int, by_name: str) -> None:
+        await self.db.execute(
+            """
+            INSERT INTO claims(target_id, by_id, by_name, created_at)
+            VALUES(?, ?, ?, ?)
+            ON CONFLICT(target_id) DO UPDATE SET
+                by_id = excluded.by_id,
+                by_name = excluded.by_name,
+                created_at = excluded.created_at
+            """,
+            (target_id, by_id, by_name[:48], int(time.time())),
+        )
+        await self.db.commit()
+
+    async def clear_claim(self, target_id: int) -> None:
+        await self.db.execute("DELETE FROM claims WHERE target_id = ?", (target_id,))
+        await self.db.commit()
+
+    async def save_card_message(
+        self,
+        target_id: int,
+        chat_id: int,
+        message_id: int,
+        body: str,
+        username: str,
+        gift_url: str,
+    ) -> None:
+        await self.db.execute(
+            """
+            INSERT INTO card_messages(chat_id, message_id, target_id, body, username, gift_url)
+            VALUES(?, ?, ?, ?, ?, ?)
+            ON CONFLICT(chat_id, message_id) DO UPDATE SET
+                target_id = excluded.target_id,
+                body = excluded.body,
+                username = excluded.username,
+                gift_url = excluded.gift_url
+            """,
+            (chat_id, message_id, target_id, body, username, gift_url),
+        )
+        await self.db.commit()
+
+    async def list_card_messages(self, target_id: int) -> list[dict[str, Any]]:
+        cur = await self.db.execute(
+            """
+            SELECT chat_id, message_id, body, username, gift_url
+            FROM card_messages
+            WHERE target_id = ?
+            ORDER BY message_id DESC
+            LIMIT 40
+            """,
+            (target_id,),
+        )
+        return [dict(row) for row in await cur.fetchall()]

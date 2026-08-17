@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 router = Router()
-BUILD = "17aug-h"
+BUILD = "17aug-i"
 
 FILTER_HINTS = {
     "newbie_max": "Сколько unique NFT максимум (новичок).",
@@ -470,6 +470,35 @@ async def cmd_start(message: Message, app: App) -> None:
 async def cb_home(call: CallbackQuery, app: App) -> None:
     await call.answer()
     await safe_edit(call, await home_text(app, call.from_user), main_kb())
+
+
+@router.callback_query(F.data.startswith("claim:"))
+async def cb_claim(call: CallbackQuery, app: App) -> None:
+    if not call.from_user or not call.data:
+        await call.answer()
+        return
+    try:
+        target_id = int(call.data.split(":", 1)[1])
+    except (IndexError, ValueError):
+        await call.answer("Карточка сломалась", show_alert=True)
+        return
+    if not target_id:
+        await call.answer("Этого человека нельзя занять", show_alert=True)
+        return
+    user = call.from_user
+    name = f"@{user.username}" if user.username else (user.first_name or "админ").strip()[:32]
+    existing = await app.db.get_claim(target_id)
+    if existing and int(existing["by_id"]) != user.id:
+        await call.answer(f"Уже пишет {existing['by_name']}", show_alert=True)
+        return
+    if existing and int(existing["by_id"]) == user.id:
+        await app.db.clear_claim(target_id)
+        await app.notifier.refresh_claim_cards(target_id)
+        await call.answer("Снял, можно писать другим")
+        return
+    await app.db.set_claim(target_id, user.id, name)
+    await app.notifier.refresh_claim_cards(target_id)
+    await call.answer("Занял. Пиши ему, остальные видят что занято")
 
 
 @router.callback_query(F.data == "menu:profile")
