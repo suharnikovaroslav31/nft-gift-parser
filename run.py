@@ -6,8 +6,6 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from nft_parser.app import run
 from nft_parser.config import Settings
 
@@ -29,7 +27,12 @@ def setup_logging() -> None:
 
 
 def main() -> None:
-    load_dotenv()
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except ImportError:
+        pass
     setup_logging()
     settings = Settings()
     asyncio.run(run(settings))
