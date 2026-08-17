@@ -15,7 +15,7 @@ from aiogram.enums import ParseMode
 
 from nft_parser.bot import AppMiddleware, router
 from nft_parser.emoji import pe
-from nft_parser.catalog import CATALOG, tracker_usernames
+from nft_parser.catalog import CATALOG, catalog_kind, tracker_usernames
 from nft_parser.config import Settings, load_live_session
 from nft_parser.db import Database
 from nft_parser.models import Hit, ProfileGifts
@@ -116,7 +116,7 @@ async def ensure_catalog(db: Database) -> None:
 
 async def apply_people_mode(db: Database) -> None:
     current = await db.get_setting("people_mode") or ""
-    if current in {"10", "14", "15"}:
+    if current in {"10", "14", "15", "16"}:
         await db.set_running(True)
         return
     await db.update_filters(
@@ -138,28 +138,28 @@ async def apply_people_mode(db: Database) -> None:
 
 
 async def apply_userbot_mode(db: Database) -> None:
-    if await db.get_setting("people_mode") == "15":
+    if await db.get_setting("people_mode") == "16":
         await db.set_running(True)
         return
     await db.update_filters(
         newbie_only=True,
-        newbie_max=2,
-        require_username=True,
+        newbie_max=3,
+        require_username=False,
         skip_sold=True,
         chats_enabled=True,
         market_enabled=True,
         min_price_ton=0.0,
-        recent_hours=168,
+        recent_hours=0,
         check_senders=True,
         check_gift_links=True,
-        max_tg_level=6,
-        max_gift_usd=40.0,
-        max_gift_ton=18.0,
-        cheap_list_ton=12.0,
+        max_tg_level=10,
+        max_gift_usd=55.0,
+        max_gift_ton=28.0,
+        cheap_list_ton=22.0,
     )
-    await db.set_setting("people_mode", "15")
+    await db.set_setting("people_mode", "16")
     await db.set_running(True)
-    log.info("Лохи: ≤2 NFT, lvl≤6, подарок ≤18 TON / $40, без обязательной даты Gifted to")
+    log.info("Lokhi: <=3 NFT, lvl<=10, gift <=28 TON / $55, any chats, no date gate")
 
 
 def _min_price_ok(deal_price: float, min_price: float) -> bool:
@@ -239,7 +239,7 @@ async def web_loop(app: App) -> None:
                 filters = await app.db.get_filters()
                 newbie_max = int(filters.get("newbie_max") or 5)
                 newbie_only = bool(filters.get("newbie_only", True))
-                max_age_days = max(1, int(filters.get("recent_hours") or 168) // 24)
+                max_age_days = int(filters.get("recent_hours") or 0) // 24
                 max_price_ton = float(filters.get("max_gift_ton") or 18)
                 sent = 0
                 scanned = 0
@@ -746,21 +746,16 @@ async def _bootstrap(app: App, me: Any, scanner: Any, db: Database, notifier: No
     log.info("Подхватил диалоги юзербота: %s чатов", extra)
 
     warmed = 0
-    people = {
-        item["username"].lower()
-        for item in CATALOG
-        if item.get("kind") in {"chat", "community"}
-    }
-    track = {name.lower() for name in tracker_usernames()} | people
     for chat in await db.list_chats():
-        uname = (chat.get("username") or "").lower()
-        if uname not in track or not chat.get("enabled"):
+        if not chat.get("enabled"):
             continue
-        limit = 40 if uname in people else 15
+        uname = (chat.get("username") or "").lower()
+        kind = catalog_kind(uname) if uname else "chat"
+        limit = 35 if kind == "chat" else 12
         try:
             warmed += await scanner.scan_recent(int(chat["chat_id"]), limit=limit)
         except Exception:
-            log.exception("Прогрев @%s", uname)
+            log.exception("Прогрев @%s", uname or chat.get("chat_id"))
     log.info("Прогрев истории: %s проверок в очереди", warmed)
     from nft_parser.gifts import public_username
 
@@ -771,7 +766,7 @@ async def _bootstrap(app: App, me: Any, scanner: Any, db: Database, notifier: No
         f'{pe("fire")} <b>Админ-панель</b>\n'
         f'{pe("user")} парсер: юзербот @{nick or me.id}\n'
         f'{pe("chat")} каналов: <b>{chats_n}</b>\n'
-        f'{pe("teddy")} ≤2 NFT · недорого · не киты'
+        f'{pe("teddy")} <=3 NFT · недорого · любые чаты'
     )
     if panel:
         await notifier.send_text(hello)

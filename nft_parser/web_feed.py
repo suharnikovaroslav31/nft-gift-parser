@@ -332,7 +332,7 @@ def why_not_noob(
         return f"цена {price:g} TON"
     if price and asset_u == "GRAM" and price > max_price_ton:
         return f"цена {price:g} GRAM"
-    if card.gifted_at:
+    if card.gifted_at and max_age_days > 0:
         age_days = (datetime.now(timezone.utc).timestamp() - card.gifted_at) / 86400
         if age_days > max_age_days:
             return f"подарок получен {age_days:.0f} дн. назад"

@@ -119,21 +119,22 @@ def passes_filters(
         return False, False, False
     if max_unique and count > max_unique:
         return False, False, False
-    newbie_max = int(filters.get("newbie_max") or 2)
+    newbie_max = int(filters.get("newbie_max") or 3)
     is_newbie = 0 < count <= newbie_max
     if filters.get("newbie_only") and not is_newbie:
         return False, False, False
 
-    max_level = int(filters.get("max_tg_level") or 6)
-    if profile.tg_level is not None and profile.tg_level > max_level:
+    max_level = int(filters.get("max_tg_level") or 10)
+    level = profile.tg_level
+    if level is not None and level >= 0 and level > max_level:
         return False, is_newbie, False
 
     if any(is_whale_gift(g.slug, g.title) for g in gifts):
         return False, is_newbie, False
 
-    max_usd = float(filters.get("max_gift_usd") or 40)
-    max_ton = float(filters.get("max_gift_ton") or 18)
-    cheap_list = float(filters.get("cheap_list_ton") or 12)
+    max_usd = float(filters.get("max_gift_usd") or 55)
+    max_ton = float(filters.get("max_gift_ton") or 28)
+    cheap_list = float(filters.get("cheap_list_ton") or 22)
     usd_vals = [g.value_usd for g in gifts if g.value_usd]
     ton_vals = [g.value_ton for g in gifts if g.value_ton]
     listed_vals = [g.listed_ton for g in gifts if g.listed_ton]
@@ -144,17 +145,15 @@ def passes_filters(
     if listed_vals and min(listed_vals) > cheap_list:
         return False, is_newbie, False
 
-    recent_hours = int(filters.get("recent_hours") or 168)
+    recent_hours = int(filters.get("recent_hours") or 0)
     just_bought = bool(extra_gifts)
     now = int(time.time())
     stamps = [stamp for stamp in (to_unix(g.received_at) or 0 for g in gifts) if stamp]
-    if recent_hours > 0 and stamps:
-        cutoff = now - recent_hours * 3600
-        just_bought = any(stamp >= cutoff for stamp in stamps)
-        if not just_bought:
-            return False, is_newbie, False
-    elif stamps:
-        just_bought = just_bought or any(stamp >= now - 24 * 3600 for stamp in stamps)
+    if stamps:
+        if recent_hours > 0:
+            just_bought = any(stamp >= now - recent_hours * 3600 for stamp in stamps)
+        else:
+            just_bought = just_bought or any(stamp >= now - 7 * 86400 for stamp in stamps)
     return True, is_newbie, just_bought
 
 
@@ -235,7 +234,7 @@ class ChatScanner:
                 log.warning("Каталог: не вступил в @%s: %s", username, exc)
         return ok, fail
 
-    async def watch_all_dialogs(self, limit: int = 180) -> int:
+    async def watch_all_dialogs(self, limit: int = 400) -> int:
         added = 0
         async for dialog in self.client.iter_dialogs(limit=limit):
             entity = dialog.entity

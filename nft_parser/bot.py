@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 router = Router()
-BUILD = "17aug-o"
+BUILD = "17aug-p"
 
 FILTER_HINTS = {
     "newbie_max": "Сколько unique NFT максимум (лох: 1–2).",
@@ -272,7 +272,7 @@ async def admin_text(app: App) -> str:
         f'{pe("pin")} owner id: <code>{html.escape(str(owner))}</code>\n'
         f'{pe("info")} админов: <b>{len(admins)}</b>\n\n'
         f'{pe("graph")} находок: <b>{stats["finds"]}</b> · чатов: <b>{stats["chats"]}</b>\n'
-        f'{pe("teddy")} фильтр: ≤{filters.get("newbie_max", 2)} NFT · lvl ≤{filters.get("max_tg_level", 6)} · до {filters.get("max_gift_ton") or 18:g} TON'
+        f'{pe("teddy")} фильтр: ≤{filters.get("newbie_max", 3)} NFT · lvl ≤{filters.get("max_tg_level", 10)} · до {filters.get("max_gift_ton") or 28:g} TON'
     )
 
 
