@@ -158,17 +158,37 @@ def onoff(value: bool) -> str:
     return "вкл" if value else "выкл"
 
 
+async def scanner_label(app: App) -> str:
+    uname = (await app.db.get_setting("scanner_username") or "").strip().lstrip("@")
+    sid = (await app.db.get_setting("scanner_id") or "").strip()
+    if uname:
+        return f"@{uname}"
+    if sid:
+        return sid
+    return "не залогинен"
+
+
 async def home_text(app: App, user: Any) -> str:
     running = await app.db.is_running()
     stats = await app.db.stats()
     name = html.escape((getattr(user, "first_name", None) or "Admin").strip())
     status = "в работе" if running else "пауза"
     mark = pe("check") if running else pe("pause")
+    scanner = await scanner_label(app)
+    warn = ""
+    if scanner == "не залогинен":
+        warn = (
+            f'\n\n{pe("warn")} <b>карточки не идут</b>: юзербот не залогинен.\n'
+            "В Bothost должна быть переменная <code>SESSION_STRING</code>, "
+            "потом передеплой."
+        )
     return (
         f'{pe("fire")} <b>Gift Hunter</b>\n\n'
         f'{pe("user")} привет, <b>{name}</b>\n'
         f"{mark} парсер: <b>{status}</b>\n"
-        f'{pe("star")} находок: <b>{stats["finds"]}</b>\n\n'
+        f'{pe("teddy")} юзербот: <b>{html.escape(scanner)}</b>\n'
+        f'{pe("star")} находок: <b>{stats["finds"]}</b> · чатов: <b>{stats["chats"]}</b>'
+        f"{warn}\n\n"
         f'{pe("pin")} разделы: профиль · <b>админ</b> · фильтры · настройки'
     )
 
@@ -178,10 +198,7 @@ async def profile_text(app: App, user: Any) -> str:
     owner = await app.db.get_setting("owner_id")
     role = "владелец" if owner and str(getattr(user, "id", "")) == str(owner) else "админ"
     uname = f"@{user.username}" if getattr(user, "username", None) else "без username"
-    scanner = "не подключен"
-    if app.settings.has_userbot and app.userbot is not None:
-        me = await app.userbot.get_me()
-        scanner = f"@{me.username}" if me.username else str(me.id)
+    scanner = await scanner_label(app)
     return (
         f'{pe("user")} <b>Профиль</b>\n\n'
         f'{pe("pin")} {html.escape(user.full_name or "Admin")}\n'
@@ -202,10 +219,7 @@ async def admin_text(app: App) -> str:
     owner = await app.db.get_setting("owner_id") or "—"
     mark = pe("check") if running else pe("pause")
     status = "в работе" if running else "на паузе"
-    scanner = "выкл"
-    if app.settings.has_userbot and app.userbot is not None:
-        me = await app.userbot.get_me()
-        scanner = f"@{me.username}" if me.username else str(me.id)
+    scanner = await scanner_label(app)
     return (
         f'{pe("star")} <b>Админ</b>\n'
         f"<i>управление парсером</i>\n\n"
@@ -376,21 +390,21 @@ async def cmd_start(message: Message, app: App) -> None:
 
 @router.callback_query(F.data == "menu:home")
 async def cb_home(call: CallbackQuery, app: App) -> None:
-    await safe_edit(call, await home_text(app, call.from_user), main_kb())
     await call.answer()
+    await safe_edit(call, await home_text(app, call.from_user), main_kb())
 
 
 @router.callback_query(F.data == "menu:profile")
 async def cb_profile(call: CallbackQuery, app: App) -> None:
-    await safe_edit(call, await profile_text(app, call.from_user), back_kb())
     await call.answer()
+    await safe_edit(call, await profile_text(app, call.from_user), back_kb())
 
 
 @router.callback_query(F.data.in_({"menu:admin", "menu:panel"}))
 async def cb_admin(call: CallbackQuery, app: App) -> None:
+    await call.answer()
     running = await app.db.is_running()
     await safe_edit(call, await admin_text(app), admin_kb(running))
-    await call.answer()
 
 
 @router.callback_query(F.data == "run:on")

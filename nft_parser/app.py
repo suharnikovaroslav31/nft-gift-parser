@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -314,7 +315,15 @@ async def run(settings: Settings) -> None:
     if settings.has_userbot:
         await run_userbot(settings)
         return
-    log.info("Запуск без api_id: читаю публичные ленты t.me/s/…")
+    log.warning(
+        "Юзербот выключен: api_id=%s hash=%s session=%s phone=%s DATA_DIR=%s",
+        bool(settings.api_id),
+        bool(settings.api_hash),
+        bool(settings.session_string.strip()),
+        bool(settings.phone),
+        bool(os.getenv("DATA_DIR")),
+    )
+    log.info("Запуск без юзербота: публичные ленты t.me/s/…")
     app = await build_web_app(settings)
     await ensure_catalog(app.db)
     await apply_people_mode(app.db)
@@ -334,9 +343,11 @@ async def run(settings: Settings) -> None:
         return
     log.info("Бот: @%s", bot_me.username)
     await app.notifier.send_text(
-        "🎁 <b>Люди, которые в NFT не шарят</b>\n"
-        "Только свежий подарок, сам владелец, не маркет и не киты.\n"
-        "Напишите /start."
+        f'{pe("warn")} <b>Юзербот не залогинен</b>\n'
+        "Админка бота работает, карточки парсера не идут.\n"
+        "В Bothost добавь <code>SESSION_STRING</code>, <code>API_ID</code>, "
+        "<code>API_HASH</code> и сделай передеплой.\n"
+        "Потом /start с личного аккаунта."
     )
     try:
         await asyncio.gather(
@@ -423,6 +434,7 @@ async def run_userbot(settings: Settings) -> None:
     me = await userbot.get_me()
     scanner_id = int(me.id)
     await db.set_setting("scanner_id", str(scanner_id))
+    await db.set_setting("scanner_username", me.username or "")
     await db.remove_admin(scanner_id)
     notifier.skip_ids.add(scanner_id)
     owner = await db.get_setting("owner_id")

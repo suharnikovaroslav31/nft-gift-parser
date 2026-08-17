@@ -3,8 +3,21 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from typing import Any
+
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _env(*names: str) -> str:
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is None:
+            continue
+        value = raw.strip().strip('"').strip("'").replace("\r", "").replace("\n", "")
+        if value:
+            return value
+    return ""
 
 
 class Settings(BaseSettings):
@@ -13,6 +26,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
+        case_sensitive=False,
     )
 
     bot_token: str
@@ -53,12 +67,43 @@ class Settings(BaseSettings):
                 ids.append(int(part))
         return ids
 
+    @model_validator(mode="before")
+    @classmethod
+    def pull_os_env(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        mapping = {
+            "bot_token": ("BOT_TOKEN",),
+            "api_id": ("API_ID", "TELEGRAM_API_ID"),
+            "api_hash": ("API_HASH", "TELEGRAM_API_HASH"),
+            "phone": ("PHONE",),
+            "session_string": ("SESSION_STRING", "STRING_SESSION"),
+            "admin_ids": ("ADMIN_IDS",),
+            "portals_auth": ("PORTALS_AUTH",),
+            "tonnel_auth": ("TONNEL_AUTH",),
+        }
+        for field, names in mapping.items():
+            current = data.get(field)
+            if current not in (None, ""):
+                continue
+            value = _env(*names)
+            if value:
+                data[field] = value
+        return data
+
     @field_validator("api_id", mode="before")
     @classmethod
     def empty_api_id(cls, value: object) -> object:
         if value in ("", None, 0, "0"):
             return None
         return value
+
+    @field_validator("session_string", mode="before")
+    @classmethod
+    def clean_session_string(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return value.strip().strip('"').strip("'").replace("\r", "").replace("\n", "")
 
     @field_validator("proxy_port", mode="before")
     @classmethod
@@ -79,7 +124,11 @@ class Settings(BaseSettings):
 
     @property
     def has_userbot(self) -> bool:
-        return bool(self.api_id and self.api_hash and (self.phone or self.session_string))
+        if not (self.api_id and self.api_hash):
+            return False
+        if os.getenv("DATA_DIR"):
+            return bool(self.session_string.strip())
+        return bool(self.phone or self.session_string.strip())
 
     def telethon_session(self):
         if self.session_string.strip():
