@@ -643,9 +643,13 @@ async def run_userbot(settings: Settings) -> None:
         await apply_userbot_mode(db)
         await scanner.start()
         me = await userbot.get_me()
+        from nft_parser.gifts import public_username
+
         scanner_id = int(me.id)
         await db.set_setting("scanner_id", str(scanner_id))
-        await db.set_setting("scanner_username", me.username or "")
+        nick = public_username(me)
+        if nick:
+            await db.set_setting("scanner_username", nick)
         await db.remove_admin(scanner_id)
         notifier.skip_ids.add(scanner_id)
         owner = await db.get_setting("owner_id")
@@ -657,7 +661,7 @@ async def run_userbot(settings: Settings) -> None:
             await db.set_setting("owner_id", str(panel[0]))
         log.info(
             "Юзербот @%s парсит. Админка — бот @parsers_informain_bot, напиши /start с личного аккаунта",
-            me.username or scanner_id,
+            nick or scanner_id,
         )
         await asyncio.gather(_worker(app), _market(app), _bootstrap(app, me, scanner, db, notifier))
 
@@ -736,13 +740,16 @@ async def _bootstrap(app: App, me: Any, scanner: Any, db: Database, notifier: No
         except Exception:
             log.exception("Прогрев @%s", uname)
     log.info("Прогрев истории: %s проверок в очереди", warmed)
+    from nft_parser.gifts import public_username
+
     chats_n = len(await db.list_chats())
     panel = await db.list_admins()
+    nick = public_username(me)
     hello = (
         f'{pe("fire")} <b>Админ-панель</b>\n'
-        f'{pe("user")} парсер: юзербот @{me.username or me.id}\n'
+        f'{pe("user")} парсер: юзербот @{nick or me.id}\n'
         f'{pe("chat")} каналов: <b>{chats_n}</b>\n'
-        f'{pe("teddy")} ≤4 NFT · lvl ≤3 · дешёвые гифты'
+        f'{pe("teddy")} ≤2 NFT · недорого · не киты'
     )
     if panel:
         await notifier.send_text(hello)

@@ -20,6 +20,25 @@ from nft_parser.models import GiftInfo, ProfileGifts
 
 log = logging.getLogger(__name__)
 
+
+def public_username(user: Any) -> str | None:
+    """Обычный @nick или активный из user.usernames (коллекционные ники)."""
+    if user is None:
+        return None
+    name = getattr(user, "username", None)
+    if name:
+        return str(name).lstrip("@") or None
+    picked = None
+    for item in getattr(user, "usernames", None) or []:
+        uname = str(getattr(item, "username", None) or "").lstrip("@")
+        if not uname:
+            continue
+        if getattr(item, "active", None) is True or getattr(item, "editable", None) is True:
+            return uname
+        if picked is None:
+            picked = uname
+    return picked
+
 NFT_SLUG_RE = re.compile(
     r"(?:https?://)?(?:t\.me|telegram\.me)/(?:nft/|gift/)([A-Za-z0-9_+\-]+)",
     re.IGNORECASE,
@@ -243,6 +262,15 @@ class GiftService:
             return None
         if not isinstance(user, User) or user.bot or user.deleted:
             return None
+        if not public_username(user):
+            try:
+                full = await self.client(GetFullUserRequest(user))
+                for item in getattr(full, "users", None) or []:
+                    if isinstance(item, User) and item.id == user.id:
+                        user = item
+                        break
+            except (FloodWaitError, RPCError, ValueError, TypeError):
+                pass
 
         unique: list[GiftInfo] = []
         offset = ""
@@ -277,7 +305,7 @@ class GiftService:
 
         profile = ProfileGifts(
             user_id=int(user.id),
-            username=user.username,
+            username=public_username(user),
             first_name=user.first_name or "",
             last_name=user.last_name or "",
             unique=unique,

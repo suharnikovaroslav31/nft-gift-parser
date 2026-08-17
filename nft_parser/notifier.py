@@ -90,20 +90,26 @@ def hit_keyboard(hit: Hit, claim: dict | None = None) -> InlineKeyboardMarkup | 
 
 
 def _user_block(profile) -> str:
-    if profile.username:
+    uname = (profile.username or "").strip().lstrip("@")
+    if uname:
         line = (
-            f'{pe("user")} <a href="https://t.me/{profile.username}">'
-            f"<b>@{_esc(profile.username)}</b></a>"
+            f'{pe("user")} <a href="https://t.me/{uname}">'
+            f"<b>@{_esc(uname)}</b></a>"
         )
         name = profile.display_name
-        if name and name.lower() not in {profile.username.lower(), f"@{profile.username.lower()}"}:
+        if name and name.lower() not in {uname.lower(), f"@{uname.lower()}"}:
             if name not in {"юзер не указан", "на маркете"}:
                 line += f" · {_esc(name)}"
-        if profile.user_id and profile.user_id < 1_000_000_000:
+        if profile.user_id and (
+            profile.user_id < 1_000_000_000 or profile.user_id >= 1_800_000_000
+        ):
             line += f'\n{pe("pin")} <code>{profile.user_id}</code>'
         return line
-    if profile.user_id and profile.user_id < 1_000_000_000:
-        return f"{pe('user')} {profile.mention}\n{pe('pin')} <code>{profile.user_id}</code>"
+    if profile.user_id and profile.user_id > 0:
+        return (
+            f"{pe('user')} {profile.mention}\n"
+            f"{pe('pin')} <code>{profile.user_id}</code>"
+        )
     name = (profile.first_name or "").strip()
     if name and name.lower() not in {"юзер не указан", "на маркете"}:
         return f"{pe('user')} {_esc(name)} — @username нет"
