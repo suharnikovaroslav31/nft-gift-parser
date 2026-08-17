@@ -26,14 +26,14 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 router = Router()
-BUILD = "17aug-j"
+BUILD = "17aug-k"
 
 FILTER_HINTS = {
-    "newbie_max": "Сколько unique NFT максимум (новичок).",
-    "max_tg_level": "Максимальный уровень Telegram (Stars Rating).",
+    "newbie_max": "Сколько unique NFT максимум (лох: 1–2).",
+    "max_tg_level": "Максимальный уровень Telegram. Выше — уже не лох.",
     "max_gift_ton": "Максимальная цена подарка в TON.",
     "max_gift_usd": "Максимальная цена подарка в $.",
-    "cheap_list_ton": "Листинг считается дешёвым до скольки TON.",
+    "cheap_list_ton": "Если листинг дороже — это уже не лох.",
     "min_price_ton": "Минимальная цена с маркета (0 = без лимита).",
 }
 
@@ -257,7 +257,7 @@ async def admin_text(app: App) -> str:
         f'{pe("pin")} owner id: <code>{html.escape(str(owner))}</code>\n'
         f'{pe("info")} админов: <b>{len(admins)}</b>\n\n'
         f'{pe("graph")} находок: <b>{stats["finds"]}</b> · чатов: <b>{stats["chats"]}</b>\n'
-        f'{pe("teddy")} фильтр: ≤{filters.get("newbie_max", 4)} NFT · lvl ≤{filters.get("max_tg_level", 3)}'
+        f'{pe("teddy")} фильтр: ≤{filters.get("newbie_max", 2)} NFT · lvl ≤{filters.get("max_tg_level", 2)} · свежие 48ч'
     )
 
 
@@ -278,12 +278,12 @@ def admin_kb(running: bool) -> InlineKeyboardMarkup:
 async def filters_text(filters: dict[str, Any]) -> str:
     return (
         f'{pe("search")} <b>Фильтры</b>\n'
-        f"<i>кого считать новичком</i>\n\n"
-        f'{pe("teddy")} unique NFT: <b>≤ {filters.get("newbie_max", 4)}</b>\n'
-        f'{pe("star")} Telegram lvl: <b>≤ {filters.get("max_tg_level", 3)}</b>\n'
-        f'{pe("money")} цена подарка: <b>≤ {filters.get("max_gift_ton") or 15:g} TON</b>\n'
-        f'{pe("graph")} цена в $: <b>≤ {filters.get("max_gift_usd") or 30:g}</b>\n'
-        f'{pe("new")} дешёвый листинг: <b>≤ {filters.get("cheap_list_ton") or 8:g} TON</b>\n\n'
+        f"<i>лохи: мало NFT, дешёвый свежий подарок, низкий lvl</i>\n\n"
+        f'{pe("teddy")} unique NFT: <b>≤ {filters.get("newbie_max", 2)}</b>\n'
+        f'{pe("star")} Telegram lvl: <b>≤ {filters.get("max_tg_level", 2)}</b>\n'
+        f'{pe("money")} цена подарка: <b>≤ {filters.get("max_gift_ton") or 6:g} TON</b>\n'
+        f'{pe("graph")} цена в $: <b>≤ {filters.get("max_gift_usd") or 12:g}</b>\n'
+        f'{pe("new")} дешёвый листинг: <b>≤ {filters.get("cheap_list_ton") or 4:g} TON</b>\n\n'
         f'{pe("check") if filters.get("newbie_only", True) else pe("cross")} только новички: <b>{onoff(bool(filters.get("newbie_only", True)))}</b>\n'
         f'{pe("check") if filters.get("require_username", True) else pe("cross")} нужен @username: <b>{onoff(bool(filters.get("require_username", True)))}</b>'
     )
@@ -291,11 +291,11 @@ async def filters_text(filters: dict[str, Any]) -> str:
 
 def filters_kb(filters: dict[str, Any]) -> InlineKeyboardMarkup:
     return kb(
-        [btn(f"Макс. NFT · {filters.get('newbie_max', 4)}", "flt:num:newbie_max", key="teddy")],
-        [btn(f"Макс. lvl · {filters.get('max_tg_level', 3)}", "flt:num:max_tg_level", key="star")],
-        [btn(f"Макс. TON · {filters.get('max_gift_ton') or 15}", "flt:num:max_gift_ton", key="money")],
-        [btn(f"Макс. $ · {filters.get('max_gift_usd') or 30}", "flt:num:max_gift_usd", key="graph")],
-        [btn(f"Листинг · {filters.get('cheap_list_ton') or 8} TON", "flt:num:cheap_list_ton", key="new")],
+        [btn(f"Макс. NFT · {filters.get('newbie_max', 2)}", "flt:num:newbie_max", key="teddy")],
+        [btn(f"Макс. lvl · {filters.get('max_tg_level', 2)}", "flt:num:max_tg_level", key="star")],
+        [btn(f"Макс. TON · {filters.get('max_gift_ton') or 6}", "flt:num:max_gift_ton", key="money")],
+        [btn(f"Макс. $ · {filters.get('max_gift_usd') or 12}", "flt:num:max_gift_usd", key="graph")],
+        [btn(f"Листинг · {filters.get('cheap_list_ton') or 4} TON", "flt:num:cheap_list_ton", key="new")],
         [
             btn(
                 "Новички " + ("✓" if filters.get("newbie_only", True) else "✗"),

@@ -16,6 +16,7 @@ from telethon.utils import get_peer_id
 from nft_parser.db import Database
 from nft_parser.gifts import GiftService, extract_slugs, to_unix, unique_to_info
 from nft_parser.models import GiftInfo, Hit, ProfileGifts
+from nft_parser.web_feed import is_whale_gift, looks_like_trader
 
 log = logging.getLogger(__name__)
 
@@ -104,11 +105,13 @@ def passes_filters(
     filters: dict[str, Any],
     extra_gifts: list[GiftInfo] | None = None,
 ) -> tuple[bool, bool, bool]:
-    gifts = profile.unique or extra_gifts or []
+    gifts = list(profile.unique or extra_gifts or [])
     count = profile.total_unique or len(gifts)
     if profile.hidden and not gifts:
         return False, False, False
     if filters.get("require_username") and not profile.username:
+        return False, False, False
+    if looks_like_trader(profile.username) or looks_like_trader(profile.first_name):
         return False, False, False
     min_unique = int(filters.get("min_unique") or 1)
     max_unique = int(filters.get("max_unique") or 0)
@@ -116,38 +119,45 @@ def passes_filters(
         return False, False, False
     if max_unique and count > max_unique:
         return False, False, False
-    newbie_max = int(filters.get("newbie_max") or 4)
+    newbie_max = int(filters.get("newbie_max") or 2)
     is_newbie = 0 < count <= newbie_max
     if filters.get("newbie_only") and not is_newbie:
         return False, False, False
 
-    max_level = int(filters.get("max_tg_level") or 3)
+    max_level = int(filters.get("max_tg_level") or 2)
     if profile.tg_level is not None and profile.tg_level > max_level:
         return False, is_newbie, False
 
-    max_usd = float(filters.get("max_gift_usd") or 30)
-    max_ton = float(filters.get("max_gift_ton") or 15)
-    cheap_list = float(filters.get("cheap_list_ton") or 8)
+    if any(is_whale_gift(g.slug, g.title) for g in gifts):
+        return False, is_newbie, False
+
+    max_usd = float(filters.get("max_gift_usd") or 12)
+    max_ton = float(filters.get("max_gift_ton") or 6)
+    cheap_list = float(filters.get("cheap_list_ton") or 4)
     usd_vals = [g.value_usd for g in gifts if g.value_usd]
     ton_vals = [g.value_ton for g in gifts if g.value_ton]
     listed_vals = [g.listed_ton for g in gifts if g.listed_ton]
-    listed_cheap = bool(listed_vals) and min(listed_vals) <= cheap_list
-    expensive = (usd_vals and max(usd_vals) > max_usd) or (ton_vals and max(ton_vals) > max_ton)
-    if expensive and not listed_cheap:
+    if usd_vals and max(usd_vals) > max_usd:
+        return False, is_newbie, False
+    if ton_vals and max(ton_vals) > max_ton:
+        return False, is_newbie, False
+    if listed_vals and min(listed_vals) > cheap_list:
         return False, is_newbie, False
 
-    recent_hours = int(filters.get("recent_hours") or 0)
-    just_bought = False
+    recent_hours = int(filters.get("recent_hours") or 48)
+    just_bought = bool(extra_gifts)
     now = int(time.time())
-    stamps = [to_unix(g.received_at) or 0 for g in gifts]
+    stamps = [stamp for stamp in (to_unix(g.received_at) or 0 for g in gifts) if stamp]
     if recent_hours > 0:
         cutoff = now - recent_hours * 3600
-        just_bought = any(stamp >= cutoff for stamp in stamps)
-        if not just_bought and any(stamps):
+        if stamps:
+            just_bought = any(stamp >= cutoff for stamp in stamps)
+            if not just_bought:
+                return False, is_newbie, False
+        elif not extra_gifts:
             return False, is_newbie, False
-    else:
-        cutoff = now - 24 * 3600
-        just_bought = any(stamp >= cutoff for stamp in stamps)
+    elif stamps:
+        just_bought = just_bought or any(stamp >= now - 24 * 3600 for stamp in stamps)
     return True, is_newbie, just_bought
 
 
@@ -253,7 +263,7 @@ class ChatScanner:
         if job.source.startswith("market") and not filters.get("market_enabled", True):
             return
 
-        newbie_max = int(filters.get("newbie_max") or 8)
+        newbie_max = int(filters.get("newbie_max") or 2)
         cached = await self.db.cached_profile(_entity_id(job.entity), _username_of(job.entity))
         if cached:
             known = int(cached.get("unique_count") or 0)

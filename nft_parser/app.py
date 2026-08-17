@@ -135,25 +135,28 @@ async def apply_people_mode(db: Database) -> None:
 
 
 async def apply_userbot_mode(db: Database) -> None:
+    if await db.get_setting("people_mode") == "14":
+        await db.set_running(True)
+        return
     await db.update_filters(
         newbie_only=True,
-        newbie_max=4,
+        newbie_max=2,
         require_username=True,
         skip_sold=True,
         chats_enabled=True,
         market_enabled=True,
         min_price_ton=0.0,
-        recent_hours=0,
+        recent_hours=48,
         check_senders=True,
         check_gift_links=True,
-        max_tg_level=3,
-        max_gift_usd=30.0,
-        max_gift_ton=15.0,
-        cheap_list_ton=8.0,
+        max_tg_level=2,
+        max_gift_usd=12.0,
+        max_gift_ton=6.0,
+        cheap_list_ton=4.0,
     )
-    await db.set_setting("people_mode", "13")
+    await db.set_setting("people_mode", "14")
     await db.set_running(True)
-    log.info("Новички: ≤4 NFT, lvl≤3, дешёвые подарки / дешёвый листинг")
+    log.info("Лохи: ≤2 NFT, lvl≤2, подарок ≤6 TON / $12, Gifted to за 48ч")
 
 
 def _min_price_ok(deal_price: float, min_price: float) -> bool:
@@ -251,6 +254,7 @@ async def web_loop(app: App) -> None:
                             price=float(row["price"] or 0),
                             asset=row["asset"] or "",
                             deal_kind=row["kind"] or "sold",
+                            max_age_days=2,
                         )
                         if skip:
                             log.info("Пропуск @%s: %s", uname, skip)
@@ -312,6 +316,7 @@ async def web_loop(app: App) -> None:
                                 price=deal.price,
                                 asset=deal.asset,
                                 deal_kind=deal.kind,
+                                max_age_days=2,
                             )
                             if skip:
                                 log.info("Пропуск @%s: %s", uname, skip)

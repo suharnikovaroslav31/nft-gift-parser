@@ -9,12 +9,12 @@ import aiosqlite
 DEFAULT_FILTERS: dict[str, Any] = {
     "min_unique": 1,
     "max_unique": 0,
-    "recent_hours": 0,
-    "newbie_max": 4,
+    "recent_hours": 48,
+    "newbie_max": 2,
     "newbie_only": True,
     "min_price_ton": 0.0,
-    "require_username": False,
-    "skip_sold": False,
+    "require_username": True,
+    "skip_sold": True,
     "skip_listed": False,
     "show_sold": True,
     "show_listed": True,
@@ -23,6 +23,10 @@ DEFAULT_FILTERS: dict[str, Any] = {
     "check_senders": True,
     "check_gift_links": True,
     "notify_every_sec": 0,
+    "max_tg_level": 2,
+    "max_gift_usd": 12.0,
+    "max_gift_ton": 6.0,
+    "cheap_list_ton": 4.0,
 }
 
 

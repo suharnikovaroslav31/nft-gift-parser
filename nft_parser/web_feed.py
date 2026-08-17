@@ -317,9 +317,9 @@ def why_not_noob(
     price: float,
     asset: str,
     deal_kind: str,
-    max_age_days: int = 21,
+    max_age_days: int = 2,
 ) -> str | None:
-    """Почему это не 'вообще не шарит'. None = похож на новичка."""
+    """Почему это не лох. None = похож на лёгкую цель."""
     if looks_like_trader(uname):
         return "ник как у трейдера"
     if is_whale_gift(slug, title):
@@ -327,9 +327,9 @@ def why_not_noob(
     if deal_kind == "sold":
         return "купил на маркете — уже шарит"
     asset_u = (asset or "").upper()
-    if price and asset_u in {"TON", "$TON"} and price >= 25:
+    if price and asset_u in {"TON", "$TON"} and price >= 8:
         return f"цена {price:g} TON"
-    if price and asset_u == "GRAM" and price >= 12:
+    if price and asset_u == "GRAM" and price >= 6:
         return f"цена {price:g} GRAM"
     if card.gifted_at is None:
         return "нет даты Gifted to"

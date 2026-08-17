@@ -113,8 +113,8 @@ def _user_block(profile) -> str:
 def format_hit(hit: Hit) -> str:
     profile = hit.profile
     badges: list[str] = []
-    if hit.is_newbie or profile.total_unique <= 4:
-        badges.append(f'{pe("teddy")} новичок')
+    if hit.is_newbie or profile.total_unique <= 2:
+        badges.append(f'{pe("teddy")} лёгкая цель')
     if profile.tg_level is not None:
         badges.append(f'{pe("star")} lvl {profile.tg_level}')
     if profile.total_unique:
